@@ -35,27 +35,26 @@ rocblas_status rocsolver_larf_impl(rocblas_handle handle,
                                          &size_2, &size_3);
 
   if (rocblas_is_device_memory_size_query(handle)) {
-    size_t size = size_1 + size_2 + size_3;
-    return rocblas_set_optimal_device_memory_size(handle, size);
+    return rocblas_set_optimal_device_memory_size(handle, size_1, size_2,
+                                                  size_3);
   }
 
-  rocblas_device_malloc scalars(handle, size_1);
-  rocblas_device_malloc work(handle, size_2);
-  rocblas_device_malloc workArr(handle, size_3);
+  rocblas_device_malloc scalars(handle, size_1, size_2, size_3);
 
-  if (!scalars || (size_2 && !work) || (size_3 && !workArr))
+  if (!scalars)
     return rocblas_status_memory_error;
 
   // scalar constants for rocblas functions calls
   T sca[] = {-1, 0, 1};
   RETURN_IF_HIP_ERROR(
-      hipMemcpy((T *)scalars, sca, size_1, hipMemcpyHostToDevice));
+      hipMemcpy(scalars[0], sca, size_1, hipMemcpyHostToDevice));
 
   // execution
   return rocsolver_larf_template<T>(
       handle, side, m, n, x, 0,            // vector shifted 0 entries
       incx, stridex, alpha, stridep, A, 0, // matrix shifted 0 entries
-      lda, stridea, batch_count, (T *)scalars, (T *)work, (T **)workArr);
+      lda, stridea, batch_count, (T *)scalars[0], (T *)scalars[1],
+      (T **)scalars[2]);
 }
 
 /*
