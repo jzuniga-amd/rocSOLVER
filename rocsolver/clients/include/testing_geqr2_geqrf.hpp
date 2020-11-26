@@ -225,6 +225,8 @@ void geqr2_geqrf_getPerfData(const rocblas_handle handle,
                                                   dIpiv.data(), stP, bc));
     }
 
+    clear_time_agg();
+
     // gpu-lapack performance
     double start;
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
@@ -443,8 +445,24 @@ void testing_geqr2_geqrf(Arguments argus)
         {
             if(argus.norm_check)
                 rocsolver_bench_output(gpu_time_used, max_error);
-            else
+            else 
+            {
+                if(!GEQRF) {
+                    rocsolver_bench_output(get_time_agg("rocsolver_larfg") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("rocsolver_setdiag") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("rocsolver_larf") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("rocsolver_restorediag") / hot_calls);
+                } else {
+                    rocsolver_bench_output(get_time_agg("rocsolver_geqr2") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("rocsolver_larft") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("rocsolver_larfb") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("copy") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("add") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("trmm") / hot_calls);
+                    rocsolver_bench_output(get_time_agg("gemm") / hot_calls);
+                }
                 rocsolver_bench_output(gpu_time_used);
+            }        
         }
     }
 }

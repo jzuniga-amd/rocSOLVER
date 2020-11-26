@@ -6,6 +6,7 @@
 #define UTILITY_HPP
 
 #include "../../../../rocblascommon/library/src/include/utility.h"
+#include "../../../../rocblascommon/clients/include/utility.hpp"
 #include <vector>
 
 #endif

@@ -99,7 +99,7 @@ rocblas_status rocsolver_geqrf_template(rocblas_handle handle,
 
     // if the matrix is small, use the unblocked (BLAS-levelII) variant of the
     // algorithm
-    if(m <= GEQxF_GEQx2_SWITCHSIZE || n <= GEQxF_GEQx2_SWITCHSIZE)
+    if(m < GEQxF_GEQx2_SWITCHSIZE || n < GEQxF_GEQx2_SWITCHSIZE)
         return rocsolver_geqr2_template<T>(handle, m, n, A, shiftA, lda, strideA, ipiv, strideP,
                                            batch_count, scalars, work_workArr, Abyx_norms_trfact,
                                            diag_tmptr);
@@ -110,39 +110,50 @@ rocblas_status rocsolver_geqrf_template(rocblas_handle handle,
     rocblas_int ldw = GEQxF_GEQx2_BLOCKSIZE;
     rocblas_stride strideW = rocblas_stride(ldw) * ldw;
 
+    double start;
+
     while(j < dim - GEQxF_GEQx2_SWITCHSIZE)
     {
         // Factor diagonal and subdiagonal blocks
         jb = min(dim - j, GEQxF_GEQx2_BLOCKSIZE); // number of columns in the block
+
+            start = get_time_us_sync(stream);
         rocsolver_geqr2_template<T>(handle, m - j, jb, A, shiftA + idx2D(j, j, lda), lda, strideA,
                                     (ipiv + j), strideP, batch_count, scalars, work_workArr,
                                     Abyx_norms_trfact, diag_tmptr);
+            add_time_agg("rocsolver_geqr2", get_time_us_sync(stream) - start);
 
         // apply transformation to the rest of the matrix
         if(j + jb < n)
         {
             // compute block reflector
+            start = get_time_us_sync(stream);
             rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise,
                                         m - j, jb, A, shiftA + idx2D(j, j, lda), lda, strideA,
                                         (ipiv + j), strideP, Abyx_norms_trfact, ldw, strideW,
                                         batch_count, scalars, (T*)work_workArr, workArr);
+            add_time_agg("rocsolver_larft", get_time_us_sync(stream) - start);
 
             // apply the block reflector
+            start = get_time_us_sync(stream);
             rocsolver_larfb_template<BATCHED, STRIDED, T>(
                 handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
                 rocblas_forward_direction, rocblas_column_wise, m - j, n - j - jb, jb, A,
                 shiftA + idx2D(j, j, lda), lda, strideA, Abyx_norms_trfact, 0, ldw, strideW, A,
                 shiftA + idx2D(j, j + jb, lda), lda, strideA, batch_count, (T*)work_workArr,
                 diag_tmptr, workArr);
+            add_time_agg("rocsolver_larfb", get_time_us_sync(stream) - start);
         }
         j += GEQxF_GEQx2_BLOCKSIZE;
     }
 
     // factor last block
     if(j < dim)
+            start = get_time_us_sync(stream);
         rocsolver_geqr2_template<T>(handle, m - j, n - j, A, shiftA + idx2D(j, j, lda), lda,
                                     strideA, (ipiv + j), strideP, batch_count, scalars,
                                     work_workArr, Abyx_norms_trfact, diag_tmptr);
+            add_time_agg("rocsolver_geqr2", get_time_us_sync(stream) - start);
 
     return rocblas_status_success;
 }

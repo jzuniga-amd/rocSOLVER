@@ -97,16 +97,22 @@ rocblas_status rocsolver_geqr2_template(rocblas_handle handle,
 
     rocblas_int dim = min(m, n); // total number of pivots
 
+    double start;
+
     for(rocblas_int j = 0; j < dim; ++j)
     {
         // generate Householder reflector to work on column j
+        start = get_time_us_sync(stream);
         rocsolver_larfg_template(handle, m - j, A, shiftA + idx2D(j, j, lda), A,
                                  shiftA + idx2D(min(j + 1, m - 1), j, lda), 1, strideA, (ipiv + j),
                                  strideP, batch_count, (T*)work_workArr, Abyx_norms);
+        add_time_agg("rocsolver_larfg", get_time_us_sync(stream) - start);
 
         // insert one in A(j,j) tobuild/apply the householder matrix
+        start = get_time_us_sync(stream);
         hipLaunchKernelGGL(set_diag<T>, dim3(batch_count, 1, 1), dim3(1, 1, 1), 0, stream, diag, 0,
                            1, A, shiftA + idx2D(j, j, lda), lda, strideA, 1, true);
+        add_time_agg("rocsolver_setdiag", get_time_us_sync(stream) - start);
 
         // conjugate tau
         if(COMPLEX)
@@ -115,15 +121,19 @@ rocblas_status rocsolver_geqr2_template(rocblas_handle handle,
         // Apply Householder reflector to the rest of matrix from the left
         if(j < n - 1)
         {
+            start = get_time_us_sync(stream);
             rocsolver_larf_template(handle, rocblas_side_left, m - j, n - j - 1, A,
                                     shiftA + idx2D(j, j, lda), 1, strideA, (ipiv + j), strideP, A,
                                     shiftA + idx2D(j, j + 1, lda), lda, strideA, batch_count,
                                     scalars, Abyx_norms, (T**)work_workArr);
+            add_time_agg("rocsolver_larf", get_time_us_sync(stream) - start);
         }
 
         // restore original value of A(j,j)
+        start = get_time_us_sync(stream);
         hipLaunchKernelGGL(restore_diag<T>, dim3(batch_count, 1, 1), dim3(1, 1, 1), 0, stream, diag,
                            0, 1, A, shiftA + idx2D(j, j, lda), lda, strideA, 1);
+        add_time_agg("rocsolver_restorediag", get_time_us_sync(stream) - start);
 
         // restore tau
         if(COMPLEX)

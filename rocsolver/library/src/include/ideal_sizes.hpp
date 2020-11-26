@@ -41,7 +41,7 @@
 #define POTRF_POTF2_SWITCHSIZE 64
 
 // geqx2/geqxf
-#define GEQxF_GEQx2_SWITCHSIZE 128
+#define GEQxF_GEQx2_SWITCHSIZE 64
 #define GEQxF_GEQx2_BLOCKSIZE 64
 
 // gexq2/gexqf

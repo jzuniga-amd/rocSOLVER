@@ -284,22 +284,29 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     rocblas_stride strideW = rocblas_stride(ldw) * order;
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
+    double start;
+
     // copy A1 to tmptr
     rocblas_int blocksx = (order - 1) / 32 + 1;
     rocblas_int blocksy = (ldw - 1) / 32 + 1;
+start = get_time_us_sync(stream);
     hipLaunchKernelGGL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0, stream, ldw,
                        order, A, offsetA1, lda, strideA, tmptr);
+add_time_agg("copy", get_time_us_sync(stream) - start);
 
     // compute: V1' * A1
     //   or    A1 * V1
+start = get_time_us_sync(stream);
     rocblasCall_trmm<BATCHED, STRIDED, T>(handle, side, uploV, transp, rocblas_diagonal_unit, ldw,
                                           order, &one, V, offsetV1, ldv, strideV, tmptr, 0, ldw,
                                           strideW, batch_count, work, workArr);
+add_time_agg("trmm", get_time_us_sync(stream) - start);
 
     // compute: V1' * A1 + V2' * A2
     //    or    A1 * V1 + A2 * V2
     if(trap)
     {
+start = get_time_us_sync(stream);
         if(leftside)
             rocblasCall_gemm<BATCHED, STRIDED, T>(handle, transp, rocblas_operation_none, ldw,
                                                   order, m - k, &one, V, offsetV2, ldv, strideV, A,
@@ -310,13 +317,16 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
                                                   order, n - k, &one, A, offsetA2, lda, strideA, V,
                                                   offsetV2, ldv, strideV, &one, tmptr, 0, ldw,
                                                   strideW, batch_count, workArr);
+add_time_agg("gemm", get_time_us_sync(stream) - start);
     }
 
     // compute: trans(T) * (V1' * A1 + V2' * A2)
     //    or    (A1 * V1 + A2 * V2) * trans(T)
+start = get_time_us_sync(stream);
     rocblasCall_trmm<false, STRIDED, T>(handle, side, uploT, transt, rocblas_diagonal_non_unit, ldw,
                                         order, &one, F, shiftF, ldf, strideF, tmptr, 0, ldw,
                                         strideW, batch_count, work, workArr);
+add_time_agg("trmm", get_time_us_sync(stream) - start);
 
     // compute: A2 - V2 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    A2 - (A1 * V1 + A2 * V2) * trans(T) * V2'
@@ -327,6 +337,7 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
 
     if(trap)
     {
+start = get_time_us_sync(stream);
         if(leftside)
             rocblasCall_gemm<BATCHED, STRIDED, T>(handle, transp, rocblas_operation_none, m - k,
                                                   order, ldw, &minone, V, offsetV2, ldv, strideV,
@@ -337,18 +348,23 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
                                                   n - k, order, &minone, tmptr, 0, ldw, strideW, V,
                                                   offsetV2, ldv, strideV, &one, A, offsetA2, lda,
                                                   strideA, batch_count, workArr);
+add_time_agg("gemm", get_time_us_sync(stream) - start);
     }
 
     // compute: V1 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    (A1 * V1 + A2 * V2) * trans(T) * V1'
+start = get_time_us_sync(stream);
     rocblasCall_trmm<BATCHED, STRIDED, T>(handle, side, uploV, transp, rocblas_diagonal_unit, ldw,
                                           order, &one, V, offsetV1, ldv, strideV, tmptr, 0, ldw,
                                           strideW, batch_count, work, workArr);
+add_time_agg("trmm", get_time_us_sync(stream) - start);
 
     // compute: A1 - V1 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    A1 - (A1 * V1 + A2 * V2) * trans(T) * V1'
+start = get_time_us_sync(stream);
     hipLaunchKernelGGL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0, stream, ldw,
                        order, A, offsetA1, lda, strideA, tmptr);
+add_time_agg("add", get_time_us_sync(stream) - start);
 
     rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;

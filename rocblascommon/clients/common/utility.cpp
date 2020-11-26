@@ -10,6 +10,9 @@
 //#include <regex>
 #include <sys/time.h>
 
+std::unordered_map<std::string, int> agg_calls;
+std::unordered_map<std::string, double> agg_times;
+
 // Random number generator
 // Note: We do not use random_device to initialize the RNG, because we want
 // repeatability in case of test failure. TODO: Add seed as an optional CLI
@@ -74,6 +77,29 @@ double get_time_us_no_sync()
     clock_gettime(CLOCK_MONOTONIC, &tv);
     return tv.tv_sec * 1'000'000llu + (tv.tv_nsec + 500llu) / 1000;
 }
+
+void add_time_agg(std::string name, double time)
+{
+    agg_calls[name]++;
+    agg_times[name] += time;
+}
+
+double get_time_agg(std::string name)
+{
+    return agg_times[name];
+}
+
+int get_calls_agg(std::string name)
+{
+    return agg_calls[name];
+}
+
+void clear_time_agg()
+{
+    agg_calls.clear();
+    agg_times.clear();
+}
+
 
 /* ============================================================================================
  */
