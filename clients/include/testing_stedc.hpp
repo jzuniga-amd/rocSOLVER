@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2020-2022 Advanced Micro Devices, Inc.
+ * Copyright (c) 2020-2023 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
@@ -502,11 +502,11 @@ void testing_stedc(Arguments& argus)
                           hInfo, hInfoRes, &max_err, &max_errv);
 
     // collect performance data
-    if(argus.timing)
+    /*    if(argus.timing)
         stedc_getPerfData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
-
+*/
     // validate results for rocsolver-test
     // using n * machine_precision as tolerance
     if(argus.unit_check)
