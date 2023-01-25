@@ -615,7 +615,7 @@ ROCSOLVER_KERNEL void stedc_split(const rocblas_int n,
     // select batch instance
     S* D = DD + (bid * strideD);
     S* E = EE + (bid * strideE);
-    rocblas_int* splits = splitsA + bid * (2 * n + 2);
+    rocblas_int* splits = splitsA + bid * (3 * n + 2);
 
     rocblas_int k = 0; //position where the last block starts
     S tol; //tolerance. If an element of E is <= tol we have an independent block
@@ -650,26 +650,24 @@ ROCSOLVER_KERNEL void stedc_split(const rocblas_int n,
     to compute the eigenvalues/eigenvectors of the symmetric tridiagonal
     submatrices **/
 template <typename S>
-ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
-    stedc_kernel(const rocblas_int n,
-                 S* DD,
-                 const rocblas_stride strideD,
-                 S* EE,
-                 const rocblas_stride strideE,
-                 S* CC,
-                 const rocblas_int shiftC,
-                 const rocblas_int ldc,
-                 const rocblas_stride strideC,
-                 rocblas_int* iinfo,
-                 void* WA,
-                 //                                                           S* WA,
-                 S* tmpzA,
-                 S* vecsA,
-                 rocblas_int* splitsA,
-                 const S eps,
-                 const S ssfmin,
-                 const S ssfmax,
-                 const rocblas_int maxblks)
+ROCSOLVER_KERNEL void __launch_bounds__(BDIM) stedc_kernel(const rocblas_int n,
+                                                           S* DD,
+                                                           const rocblas_stride strideD,
+                                                           S* EE,
+                                                           const rocblas_stride strideE,
+                                                           S* CC,
+                                                           const rocblas_int shiftC,
+                                                           const rocblas_int ldc,
+                                                           const rocblas_stride strideC,
+                                                           rocblas_int* iinfo,
+                                                           S* WA,
+                                                           S* tmpzA,
+                                                           S* vecsA,
+                                                           rocblas_int* splitsA,
+                                                           const S eps,
+                                                           const S ssfmin,
+                                                           const S ssfmax,
+                                                           const rocblas_int maxblks)
 {
     // threads and groups indices
     /* --------------------------------------------------- */
@@ -694,15 +692,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (2 * n + 2);
+    rocblas_int* splits = splitsA + bid * (3 * n + 2);
     // if idd[i] = 0, the value in position i has been deflated
     rocblas_int* idd = splits + n + 2;
-    //    // worksapce for STEQR and container of permutations when solving the secular eqns
-    //    S* W = WA + bid * (2 * n);
-    // worksapce for STEQR
-    S* W = (S*)WA + bid * (2 * n);
     // container of permutations when solving the secular eqns
-    rocblas_int* pers = (rocblas_int*)WA + bid * n;
+    rocblas_int* pers = idd + n;
+    // worksapce for STEQR
+    S* W = WA + bid * (2 * n);
     // the rank-1 modification vectors in the merges
     S* z = tmpzA + bid * (2 * n);
     // roots of secular equations
@@ -1006,8 +1002,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
                             inb = ps[tid - inb];
                             inc = ps[tid - inc];
 
-                            printf("%d k %d ii %d bloque %d inc %d inb %d countc %d countb %d\n",
-                                   sid, k, ii, tid, inc, inb, countc, countb);
                             // perform comparisons
                             for(int i = 0; i < countb; ++i)
                             {
@@ -1068,7 +1062,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
                 S* diag = D + in;
                 rocblas_int* mask = idd + in;
                 S* zz = z + in;
-                //                rocblas_int* per = (rocblas_int*)W + in;
                 rocblas_int* per = pers + in;
 
                 // find degree and components of secular equation
@@ -1090,20 +1083,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
                     }
                 }
                 __syncthreads();
-                //printf("%d k %d in %d iam %d dd %d\n",sid,k,in,iam,dd);
-
-                //if(iam==0)
-                //{
-                //    for(int u=0;u<sz;++u)
-                //        printf("%d k %d in %d u %d D %2.5f tmp %2.5f per %d\n",sid,k,in,u+in,D[u+in],temps[u+in*n],pers[u+in]);
-                //}
-                //__syncthreads();
 
                 // Order the elements in tmpd and zz using a simple parallel selection/bubble sort.
                 // This will allows to find initial intervals for eigenvalue guesses
                 rocblas_int tsz = 1 << (levs - 1 - k);
-                tsz = (n - 1) / tsz + 1;
-                for(int i = 0; i < tsz; ++i) //dd
+                tsz = (bs - 1) / tsz + 1;
+                for(int i = 0; i < tsz; ++i)
                 {
                     if(i < dd)
                     {
@@ -1146,12 +1131,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
                     }
                     __syncthreads();
                 }
-                //if(iam==0)
-                //{
-                //    for(int u=0;u<sz;++u)
-                //        printf("%d k %d in %d u %d D %2.5f tmp %2.5f per %d\n",sid,k,in,u,D[u+in],temps[u+in*n],pers[u+in]);
-                //}
-                //__syncthreads();
 
                 // make dd copies of the non-deflated ordered diagonal elements
                 // (i.e. the poles of the secular eqn) so that the distances to the
@@ -1232,7 +1211,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BDIM)
                 // 3f. Compute vectors corresponding to non-deflated values
                 /* ----------------------------------------------------------------- */
                 S temp, nrm, evj;
-                rocblas_int nn = (n - 1) / blks + 1;
+                rocblas_int nn = (bs - 1) / blks + 1;
                 bool go;
                 for(int j = 0; j < nn; ++j)
                 {
@@ -1551,7 +1530,7 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
         *size_work_stack = max(s1, s2);
 
         // size for split blocks and sub-blocks positions
-        *size_splits = sizeof(rocblas_int) * (2 * n + 2) * batch_count;
+        *size_splits = sizeof(rocblas_int) * (3 * n + 2) * batch_count;
 
         // size for temporary diagonal and rank-1 modif vector
         *size_tmpz = sizeof(S) * (2 * n) * batch_count;
@@ -1688,10 +1667,8 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         // execute divide and conquer kernel with tempvect
         ROCSOLVER_LAUNCH_KERNEL((stedc_kernel<S>), dim3(STEDC_NUM_SPLIT_BLKS, batch_count),
                                 dim3(BDIM), lmemsize, stream, n, D + shiftD, strideD, E + shiftE,
-                                strideE, tempvect, 0, ldt, strideT, info, work_stack, tmpz,
+                                strideE, tempvect, 0, ldt, strideT, info, (S*)work_stack, tmpz,
                                 tempgemm, splits, eps, ssfmin, ssfmax, maxblks);
-        //                                strideE, tempvect, 0, ldt, strideT, info, (S*)work_stack, tmpz,
-        //                                tempgemm, splits, eps, ssfmin, ssfmax, maxblks);
 
         // update eigenvectors C <- C*tempvect
         local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, tempvect, tempgemm,
