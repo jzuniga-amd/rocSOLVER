@@ -321,7 +321,7 @@ rocblas_int getrf_get_innerBlkSize(rocblas_int m, rocblas_int n, const bool pivo
         }
     }
 
-    if(blk == 1)
+//    if(blk == 1)
         blk = n;
 
     return blk;
@@ -377,7 +377,7 @@ rocblas_int getrf_get_innerBlkSize(rocblas_int m, rocblas_int n, const bool pivo
         }
     }
 
-    if(blk == 1)
+//    if(blk == 1)
         blk = n;
 
     return blk;

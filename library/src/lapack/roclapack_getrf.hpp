@@ -303,6 +303,7 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
 
     // size of outer blocks
     rocblas_int blk = getrf_get_blksize<ISBATCHED, T>(dim, pivot);
+printf("\n\n Block size is: %d\n\n",blk);
 
     if(blk == 0)
         return rocsolver_getf2_template<ISBATCHED, T>(handle, m, n, A, shiftA, lda, strideA, ipiv,
