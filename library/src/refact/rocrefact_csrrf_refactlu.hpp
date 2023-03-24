@@ -9,8 +9,6 @@
 #include "rocsolver_rfinfo.hpp"
 #include "rocsparse.hpp"
 
-#include "rocsparse_check.h"
-
 #define ADD_PAQ_MAX_THDS 256
 
 // -------------------------------------------------
@@ -245,12 +243,10 @@ void rocsolver_csrrf_refactlu_getMemorySize(const rocblas_int n,
     }
 
     // requirements for incomplete factorization
-    THROW_IF_ROCSPARSE_ERROR(rocsparseCall_csrilu0_buffer_size(
-        rfinfo->sphandle, n, nnzT, rfinfo->descrT, valT, ptrT, indT, rfinfo->infoT, size_work));
+    rocsparseCall_csrilu0_buffer_size(rfinfo->sphandle, n, nnzT, rfinfo->descrT, valT, ptrT, indT,
+                                      rfinfo->infoT, size_work);
 
-    // -------------------------------------------------------------
     // need at least size n integers to generate inverse permutation inv_pivQ
-    // -------------------------------------------------------------
     *size_work = std::max(*size_work, sizeof(rocblas_int) * n);
 }
 
@@ -277,7 +273,7 @@ rocblas_status rocsolver_csrrf_refactlu_template(rocblas_handle handle,
         return rocblas_status_success;
 
     hipStream_t stream;
-    ROCBLAS_CHECK(rocblas_get_stream(handle, &stream), rocblas_status_internal_error);
+    ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
 
     rocblas_int nthreads = ADD_PAQ_MAX_THDS;
     rocblas_int nblocks = (n + (nthreads - 1)) / nthreads;
@@ -297,8 +293,7 @@ rocblas_status rocsolver_csrrf_refactlu_template(rocblas_handle handle,
 
     // perform incomplete factorization of T
     ROCSPARSE_CHECK(rocsparseCall_csrilu0(rfinfo->sphandle, n, nnzT, rfinfo->descrT, valT, ptrT,
-                                          indT, rfinfo->infoT, rocsparse_solve_policy_auto, work),
-                    rocblas_status_internal_error);
+                                          indT, rfinfo->infoT, rocsparse_solve_policy_auto, work));
 
     return rocblas_status_success;
 }

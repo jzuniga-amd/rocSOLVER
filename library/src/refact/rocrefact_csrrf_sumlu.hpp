@@ -123,7 +123,7 @@ rocblas_status rocsolver_csrrf_sumlu_template(rocblas_handle handle,
         return rocblas_status_success;
 
     hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
+    ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
 
     // quick return with matrix zero
     if(nnzL - n + nnzU == 0)

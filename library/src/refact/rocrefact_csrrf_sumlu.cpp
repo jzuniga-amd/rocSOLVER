@@ -31,31 +31,17 @@ rocblas_status rocsolver_csrrf_sumlu_impl(rocblas_handle handle,
     if(st != rocblas_status_continue)
         return st;
 
-    rocblas_status istat = rocblas_status_success;
-    try
-    {
-        // TODO: add bacthed versions
-        // working with unshifted arrays
-        // normal (non-batched non-strided) execution
+    // TODO: add batched versions
+    // working with unshifted arrays
+    // normal (non-batched non-strided) execution
 
-        // this function does not requiere memory work space
-        if(rocblas_is_device_memory_size_query(handle))
-            return rocblas_status_size_unchanged;
+    // this function does not requiere memory work space
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_status_size_unchanged;
 
-        // execution
-        istat = rocsolver_csrrf_sumlu_template<T>(handle, n, nnzL, ptrL, indL, valL, nnzU, ptrU,
-                                                  indU, valU, ptrT, indT, valT);
-    }
-    catch(std::bad_alloc& e)
-    {
-        istat = rocblas_status_memory_error;
-    }
-    catch(...)
-    {
-        istat = rocblas_status_internal_error;
-    };
-
-    return (istat);
+    // execution
+    return rocsolver_csrrf_sumlu_template<T>(handle, n, nnzL, ptrL, indL, valL, nnzU, ptrU, indU,
+                                             valU, ptrT, indT, valT);
 #else
     return rocblas_status_not_implemented;
 #endif

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright (c) 2019-2023 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
@@ -13,6 +13,19 @@
 #include "rocblas/internal/rocblas-exported-proto.hpp"
 #include "rocblas/internal/rocblas_device_malloc.hpp"
 #include "rocsolver_logger.hpp"
+
+#define ROCBLAS_CHECK(fcn)                    \
+    {                                         \
+        rocblas_status _status = (fcn);       \
+        if(_status != rocblas_status_success) \
+            return _status;                   \
+    }
+#define THROW_IF_ROCBLAS_ERROR(fcn)           \
+    {                                         \
+        rocblas_status _status = (fcn);       \
+        if(_status != rocblas_status_success) \
+            throw _status;                    \
+    }
 
 template <typename T>
 struct rocblas_index_value_t;
