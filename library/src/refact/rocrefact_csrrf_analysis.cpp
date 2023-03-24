@@ -25,6 +25,7 @@ rocblas_status rocsolver_csrrf_analysis_impl(rocblas_handle handle,
     ROCSOLVER_ENTER_TOP("csrrf_analysis", "-n", n, "--nnzM", nnzM, "--nnzT", nnzT, "--nrhs", nrhs,
                         "--ldb", ldb);
 
+#ifdef ROCSOLVER_WITH_ROCSPARSE
     if(handle == nullptr)
         return rocblas_status_invalid_handle;
 
@@ -75,6 +76,9 @@ rocblas_status rocsolver_csrrf_analysis_impl(rocblas_handle handle,
     };
 
     return (istat);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 /*

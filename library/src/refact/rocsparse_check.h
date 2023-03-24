@@ -31,24 +31,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "rocsolver_datatype2string.hpp"
 #include "rocsparse/rocsparse.h"
-
-#ifndef rocsparseGetErrorName
-#define rocsparseGetErrorName(istat)                                                          \
-    (((istat) == rocsparse_status_success)               ? "rocsparse_status_success"         \
-         : ((istat) == rocsparse_status_invalid_handle)  ? "rocsparse_status_invalid_handle"  \
-         : ((istat) == rocsparse_status_invalid_pointer) ? "rocsparse_status_invalid_pointer" \
-         : ((istat) == rocsparse_status_invalid_size)    ? "rocsparse_status_invalid_size"    \
-         : ((istat) == rocsparse_status_memory_error)    ? "rocsparse_status_memory_error"    \
-         : ((istat) == rocsparse_status_invalid_value)   ? "rocsparse_status_invalid_value"   \
-         : ((istat) == rocsparse_status_arch_mismatch)   ? "rocsparse_status_arch_mismatch"   \
-         : ((istat) == rocsparse_status_zero_pivot)      ? "rocsparse_status_zero_pivot"      \
-         : ((istat) == rocsparse_status_not_initialized) ? "rocsparse_status_not_initialized" \
-         : ((istat) == rocsparse_status_type_mismatch)   ? "rocsparse_status_type_mismatch"   \
-         : ((istat) == rocsparse_status_requires_sorted_storage)                              \
-         ? "rocsparse_status_requires_sorted_storage"                                         \
-         : "unknown status code")
-#endif
 
 #ifndef ROCSPARSE_CHECK
 #define ROCSPARSE_CHECK(fcn, error_code)                                                        \
@@ -57,7 +41,7 @@
         if(istat != rocsparse_status_success)                                                   \
         {                                                                                       \
             printf("rocsparse API failed at line %d in file %s with error: %s(%d)\n", __LINE__, \
-                   __FILE__, rocsparseGetErrorName(istat), istat);                              \
+                   __FILE__, rocsparse2string_status(istat), istat);                            \
             fflush(stdout);                                                                     \
             return ((error_code));                                                              \
         };                                                                                      \
@@ -71,7 +55,7 @@
         if(istat != rocsparse_status_success)                                            \
         {                                                                                \
             printf("rocsparse failed at %s:%d, with error %s(%d)\n", __FILE__, __LINE__, \
-                   rocsparseGetErrorName(istat), istat);                                 \
+                   rocsparse2string_status(istat), istat);                               \
             fflush(stdout);                                                              \
             throw std::runtime_error(__FILE__);                                          \
         };                                                                               \

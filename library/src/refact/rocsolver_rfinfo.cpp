@@ -4,10 +4,11 @@
 
 #include <new>
 
-#include "rfinfo.hpp"
+#include "rocsolver_rfinfo.hpp"
 
 extern "C" rocblas_status rocsolver_create_rfinfo(rocsolver_rfinfo* rfinfo, rocblas_handle handle)
 {
+#ifdef ROCSOLVER_WITH_ROCSPARSE
     if(handle == nullptr)
         return rocblas_status_invalid_handle;
 
@@ -28,10 +29,14 @@ extern "C" rocblas_status rocsolver_create_rfinfo(rocsolver_rfinfo* rfinfo, rocb
     };
 
     return rocblas_status_success;
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 extern "C" rocblas_status rocsolver_destroy_rfinfo(rocsolver_rfinfo rfinfo)
 {
+#ifdef ROCSOLVER_WITH_ROCSPARSE
     if(rfinfo == nullptr)
         return rocblas_status_invalid_pointer;
 
@@ -52,4 +57,7 @@ extern "C" rocblas_status rocsolver_destroy_rfinfo(rocsolver_rfinfo rfinfo)
     };
 
     return rocblas_status_success;
+#else
+    return rocblas_status_not_implemented;
+#endif
 }

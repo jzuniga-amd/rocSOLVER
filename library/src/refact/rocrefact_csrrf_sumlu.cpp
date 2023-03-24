@@ -21,6 +21,7 @@ rocblas_status rocsolver_csrrf_sumlu_impl(rocblas_handle handle,
 {
     ROCSOLVER_ENTER_TOP("csrrf_sumlu", "-n", n, "--nnzL", nnzL, "--nnzU", nnzU);
 
+#ifdef ROCSOLVER_WITH_ROCSPARSE
     if(!handle)
         return rocblas_status_invalid_handle;
 
@@ -55,6 +56,9 @@ rocblas_status rocsolver_csrrf_sumlu_impl(rocblas_handle handle,
     };
 
     return (istat);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 /*

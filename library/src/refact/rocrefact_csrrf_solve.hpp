@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include "rfinfo.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_rfinfo.hpp"
 #include "rocsparse.hpp"
 
 #include "rocblas_check.h"

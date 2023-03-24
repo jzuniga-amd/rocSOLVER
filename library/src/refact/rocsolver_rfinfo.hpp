@@ -3,6 +3,7 @@
  * ************************************************************************ */
 
 #pragma once
+#ifdef ROCSOLVER_WITH_ROCSPARSE
 
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -131,3 +132,5 @@ struct rocsolver_rfinfo_
     }
 };
 typedef struct rocsolver_rfinfo_* rocsolver_rfinfo;
+
+#endif

@@ -21,6 +21,7 @@ rocblas_status rocsolver_csrrf_refactlu_impl(rocblas_handle handle,
 {
     ROCSOLVER_ENTER_TOP("csrrf_refactlu", "-n", n, "--nnzA", nnzA, "--nnzT", nnzT);
 
+#ifdef ROCSOLVER_WITH_ROCSPARSE
     if(!handle)
         return rocblas_status_invalid_handle;
 
@@ -69,6 +70,9 @@ rocblas_status rocsolver_csrrf_refactlu_impl(rocblas_handle handle,
     };
 
     return (istat);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 /*

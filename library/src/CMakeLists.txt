@@ -192,17 +192,19 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_lauum.cpp
 )
 
-set(rocsolver_refact_source
-  # rfinfo create, analysis, destroy
-  refact/rfinfo.cpp
-  refact/rocrefact_csrrf_analysis.cpp
-  # re-factorization
-  refact/rocrefact_csrrf_sumlu.cpp
-  refact/rocrefact_csrrf_splitlu.cpp
-  refact/rocrefact_csrrf_refactlu.cpp
-  # direct solver
-  refact/rocrefact_csrrf_solve.cpp
-)
+IF(BUILD_WITH_SPARSE)
+  set(rocsolver_refact_source
+    # rfinfo create, analysis, destroy
+    refact/rocsolver_rfinfo.cpp
+    refact/rocrefact_csrrf_analysis.cpp
+    # re-factorization
+    refact/rocrefact_csrrf_sumlu.cpp
+    refact/rocrefact_csrrf_splitlu.cpp
+    refact/rocrefact_csrrf_refactlu.cpp
+    # direct solver
+    refact/rocrefact_csrrf_solve.cpp
+  )
+endif()
 
 set(rocsolver_specialized_source
   # trsm
@@ -250,6 +252,7 @@ add_library(rocsolver
   ${rocsolver_specialized_source}
   ${rocsolver_auxiliary_source}
   ${rocsolver_lapack_source}
+  ${rocsolver_refact_source}
 )
 
 add_library(roc::rocsolver ALIAS rocsolver)
@@ -264,11 +267,8 @@ target_link_libraries(rocsolver
     $<$<PLATFORM_ID:Linux>:--unwindlib=libgcc>
 )
 
-if(ROCSOLVER_WITH_SPARSE)
-  target_sources(rocsolver PRIVATE ${rocsolver_refact_source})
+if(BUILD_WITH_SPARSE)
   target_link_libraries(rocsolver PRIVATE roc::rocsparse)
-else()
-  target_sources(rocsolver PRIVATE refact/rocrefact_no_rocsparse.cpp)
 endif()
 
 if(ROCSOLVER_EMBED_FMT)
