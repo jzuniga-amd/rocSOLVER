@@ -9,8 +9,6 @@
 #include "rocsolver_rfinfo.hpp"
 #include "rocsparse.hpp"
 
-#define ADD_PAQ_MAX_THDS 256
-
 // -------------------------------------------------
 // function to perform search in array
 // -------------------------------------------------
@@ -80,11 +78,10 @@ static __device__ rocblas_int rf_search(const rocblas_int len,
 // ------------------------------------------------------------
 
 template <typename I>
-ROCSOLVER_KERNEL
-    __launch_bounds__(ADD_PAQ_MAX_THDS) void rf_ipvec_kernel(I const n,
+ROCSOLVER_KERNEL __launch_bounds__(BS1) void rf_ipvec_kernel(I const n,
                                                              I const* const ipivQ, /* input */
                                                              I* const inv_ipivQ /* output */
-    )
+)
 {
     I const i_start = threadIdx.x + blockIdx.x * blockDim.x;
     I const i_inc = blockDim.x * gridDim.x;
@@ -107,18 +104,18 @@ ROCSOLVER_KERNEL
 // in increasing sorted order
 // -------------------------------------------
 template <typename T>
-ROCSOLVER_KERNEL void __launch_bounds__(ADD_PAQ_MAX_THDS) rf_add_PAQ_kernel(const rocblas_int nrow,
-                                                                            const rocblas_int ncol,
-                                                                            rocblas_int* P_new2old,
-                                                                            rocblas_int* Q_old2new,
-                                                                            const T alpha,
-                                                                            rocblas_int* Ap,
-                                                                            rocblas_int* Ai,
-                                                                            T* Ax,
-                                                                            const T beta,
-                                                                            rocblas_int* LUp,
-                                                                            rocblas_int* LUi,
-                                                                            T* LUx)
+ROCSOLVER_KERNEL void __launch_bounds__(BS1) rf_add_PAQ_kernel(const rocblas_int nrow,
+                                                               const rocblas_int ncol,
+                                                               rocblas_int* P_new2old,
+                                                               rocblas_int* Q_old2new,
+                                                               const T alpha,
+                                                               rocblas_int* Ap,
+                                                               rocblas_int* Ai,
+                                                               T* Ax,
+                                                               const T beta,
+                                                               rocblas_int* LUp,
+                                                               rocblas_int* LUi,
+                                                               T* LUx)
 {
     T const zero = 0;
     bool const is_beta_zero = (beta == zero);
@@ -275,8 +272,8 @@ rocblas_status rocsolver_csrrf_refactlu_template(rocblas_handle handle,
     hipStream_t stream;
     ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
 
-    rocblas_int nthreads = ADD_PAQ_MAX_THDS;
-    rocblas_int nblocks = (n + (nthreads - 1)) / nthreads;
+    rocblas_int nthreads = BS1;
+    rocblas_int nblocks = (n - 1) / nthreads + 1;
 
     rocblas_int* inv_pivQ = static_cast<rocblas_int*>(work);
     ROCSOLVER_LAUNCH_KERNEL(rf_ipvec_kernel<rocblas_int>, dim3(nblocks), dim3(nthreads), 0, stream,

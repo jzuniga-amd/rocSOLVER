@@ -26,7 +26,11 @@ extern "C" rocblas_status rocsolver_create_rfinfo(rocsolver_rfinfo* rfinfo, rocb
     catch(rocblas_status status)
     {
         return status;
-    };
+    }
+    catch(...)
+    {
+        return rocblas_status_internal_error;
+    }
 
     return rocblas_status_success;
 #else

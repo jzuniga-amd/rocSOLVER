@@ -26,22 +26,22 @@ ROCSOLVER_KERNEL void rf_gather_kernel(const rocblas_int n,
     rocblas_int tid = hipThreadIdx_x;
 
     // execute permutations
-    for(rocblas_int i = tid; i < n; i += hipBlockDim_x)
+    for(size_t i = tid; i < n; i += hipBlockDim_x)
     {
         const rocblas_int ip = P[i];
         const bool is_valid = (0 <= ip) && (ip < n);
         if(is_valid)
         {
-            for(rocblas_int j = 0; j < nrhs; ++j)
+            for(size_t j = 0; j < nrhs; ++j)
                 temp[i + j * n] = src[ip + j * lds];
         }
     }
     __syncthreads();
 
     // overwrite results
-    for(rocblas_int i = tid; i < n; i += hipBlockDim_x)
+    for(size_t i = tid; i < n; i += hipBlockDim_x)
     {
-        for(rocblas_int j = 0; j < nrhs; ++j)
+        for(size_t j = 0; j < nrhs; ++j)
             src[i + j * lds] = temp[i + j * n];
     }
 }
@@ -62,22 +62,22 @@ ROCSOLVER_KERNEL void rf_scatter_kernel(const rocblas_int n,
     rocblas_int tid = hipThreadIdx_x;
 
     // execute permutations
-    for(rocblas_int i = tid; i < n; i += hipBlockDim_x)
+    for(size_t i = tid; i < n; i += hipBlockDim_x)
     {
         const rocblas_int ip = P[i];
         const bool is_valid = (0 <= ip) && (ip < n);
         if(is_valid)
         {
-            for(rocblas_int j = 0; j < nrhs; ++j)
+            for(size_t j = 0; j < nrhs; ++j)
                 temp[ip + j * n] = src[i + j * lds];
         }
     }
     __syncthreads();
 
     // overwrite results
-    for(rocblas_int i = tid; i < n; i += hipBlockDim_x)
+    for(size_t i = tid; i < n; i += hipBlockDim_x)
     {
-        for(rocblas_int j = 0; j < nrhs; ++j)
+        for(size_t j = 0; j < nrhs; ++j)
             src[i + j * lds] = temp[i + j * n];
     }
 }
