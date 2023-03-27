@@ -2,7 +2,12 @@
  * Copyright (c) 2023 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
+#ifdef ROCSOLVER_WITH_ROCSPARSE
 #include "rocrefact_csrrf_sumlu.hpp"
+#else
+#include "rocblas.hpp"
+#include "rocsolver/rocsolver.h"
+#endif
 
 template <typename T, typename U>
 rocblas_status rocsolver_csrrf_sumlu_impl(rocblas_handle handle,

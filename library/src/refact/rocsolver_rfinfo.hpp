@@ -3,10 +3,10 @@
  * ************************************************************************ */
 
 #pragma once
-#ifdef ROCSOLVER_WITH_ROCSPARSE
 
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#ifdef ROCSOLVER_WITH_ROCSPARSE
 #include "rocsparse.hpp"
 
 struct rocsolver_rfinfo_
