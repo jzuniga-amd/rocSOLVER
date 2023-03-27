@@ -114,15 +114,13 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/testing_geblttrs_npvt.cpp
   )
 
-  if(BUILD_WITH_SPARSE)
-    set(rocrefact_inst_files
-      common/testing_csrrf_analysis.cpp
-      common/testing_csrrf_sumlu.cpp
-      common/testing_csrrf_splitlu.cpp
-      common/testing_csrrf_refactlu.cpp
-      common/testing_csrrf_solve.cpp
-    )
-  endif()
+  set(rocrefact_inst_files
+    common/testing_csrrf_analysis.cpp
+    common/testing_csrrf_sumlu.cpp
+    common/testing_csrrf_splitlu.cpp
+    common/testing_csrrf_refactlu.cpp
+    common/testing_csrrf_solve.cpp
+  )
 
   set(common_source_files
     common/lapack_host_reference.cpp

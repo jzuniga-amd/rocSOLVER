@@ -84,18 +84,16 @@ set(rocauxiliary_test_source
   lauum_gtest.cpp
 )
 
-if(BUILD_WITH_SPARSE)
-  set(rocrefact_test_source
-    # rfinfo analysis
-    csrrf_analysis_gtest.cpp
-    # lu refactorization
-    csrrf_sumlu_gtest.cpp
-    csrrf_splitlu_gtest.cpp
-    csrrf_refactlu_gtest.cpp
-    # sparse solver
-    csrrf_solve_gtest.cpp
-  )
-endif()
+set(rocrefact_test_source
+  # rfinfo analysis
+  csrrf_analysis_gtest.cpp
+  # lu refactorization
+  csrrf_sumlu_gtest.cpp
+  csrrf_splitlu_gtest.cpp
+  csrrf_refactlu_gtest.cpp
+  # sparse solver
+  csrrf_solve_gtest.cpp
+)
 
 set(others_test_source
   # unified memory model

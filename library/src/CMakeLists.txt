@@ -192,19 +192,17 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_lauum.cpp
 )
 
-IF(BUILD_WITH_SPARSE)
-  set(rocsolver_refact_source
-    # rfinfo create, analysis, destroy
-    refact/rocsolver_rfinfo.cpp
-    refact/rocrefact_csrrf_analysis.cpp
-    # re-factorization
-    refact/rocrefact_csrrf_sumlu.cpp
-    refact/rocrefact_csrrf_splitlu.cpp
-    refact/rocrefact_csrrf_refactlu.cpp
-    # direct solver
-    refact/rocrefact_csrrf_solve.cpp
-  )
-endif()
+set(rocsolver_refact_source
+  # rfinfo create, analysis, destroy
+  refact/rocsolver_rfinfo.cpp
+  refact/rocrefact_csrrf_analysis.cpp
+  # re-factorization
+  refact/rocrefact_csrrf_sumlu.cpp
+  refact/rocrefact_csrrf_splitlu.cpp
+  refact/rocrefact_csrrf_refactlu.cpp
+  # direct solver
+  refact/rocrefact_csrrf_solve.cpp
+)
 
 set(rocsolver_specialized_source
   # trsm

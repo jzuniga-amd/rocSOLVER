@@ -4,9 +4,6 @@
 
 #pragma once
 
-#ifdef ROCSOLVER_WITH_ROCSPARSE
-#include "rocsparse/rocsparse.h"
-#endif
 #include "rocblas/rocblas.h"
 #include "rocsolver/rocsolver.h"
 #include <string>
@@ -219,53 +216,6 @@ constexpr auto rocblas2string_initialization(rocblas_initialization init)
     return "invalid";
 }
 
-constexpr auto rocblas2string_status(rocblas_status status)
-{
-    switch(status)
-    {
-    case rocblas_status_success: return "rocblas_status_success";
-    case rocblas_status_invalid_handle: return "rocblas_status_invalid_handle";
-    case rocblas_status_not_implemented: return "rocblas_status_not_implemented";
-    case rocblas_status_invalid_pointer: return "rocblas_status_invalid_pointer";
-    case rocblas_status_invalid_size: return "rocblas_status_invalid_size";
-    case rocblas_status_memory_error: return "rocblas_status_memory_error";
-    case rocblas_status_internal_error: return "rocblas_status_internal_error";
-    case rocblas_status_perf_degraded: return "rocblas_status_perf_degraded";
-    case rocblas_status_size_query_mismatch: return "rocblas_status_size_query_mismatch";
-    case rocblas_status_size_increased: return "rocblas_status_size_increased";
-    case rocblas_status_size_unchanged: return "rocblas_status_size_unchanged";
-    case rocblas_status_invalid_value: return "rocblas_status_invalid_value";
-    case rocblas_status_continue: return "rocblas_status_continue";
-    case rocblas_status_check_numerics_fail: return "rocblas_status_check_numerics_fail";
-    }
-    return "invalid";
-}
-
-#ifdef ROCSOLVER_WITH_ROCSPARSE
-constexpr auto rocsparse2string_status(rocsparse_status status)
-{
-    switch(status)
-    {
-    case rocsparse_status_success: return "rocsparse_status_success";
-    case rocsparse_status_invalid_handle: return "rocsparse_status_invalid_handle";
-    case rocsparse_status_not_implemented: return "rocsparse_status_not_implemented";
-    case rocsparse_status_invalid_pointer: return "rocsparse_status_invalid_pointer";
-    case rocsparse_status_invalid_size: return "rocsparse_status_invalid_size";
-    case rocsparse_status_memory_error: return "rocsparse_status_memory_error";
-    case rocsparse_status_internal_error: return "rocsparse_status_internal_error";
-    case rocsparse_status_invalid_value: return "rocsparse_status_invalid_value";
-    case rocsparse_status_arch_mismatch: return "rocsparse_status_arch_mismatch";
-    case rocsparse_status_zero_pivot: return "rocsparse_status_zero_pivot";
-    case rocsparse_status_not_initialized: return "rocsparse_status_not_initialized";
-    case rocsparse_status_type_mismatch: return "rocsparse_status_type_mismatch";
-    case rocsparse_status_thrown_exception: return "rocsparse_status_thrown_exception";
-    case rocsparse_status_requires_sorted_storage:
-        return "rocsparse_status_requires_sorted_storage";
-    }
-    return "invalid";
-}
-#endif
-
 /* ============================================================================================
  */
 /*  Convert lapack char constants to rocblas type. */
@@ -458,46 +408,4 @@ inline rocblas_initialization string2rocblas_initialization(const std::string& v
         value == "hpl"        ? rocblas_initialization_hpl        :
         static_cast<rocblas_initialization>(0);
 }
-
-inline rocblas_status string2rocblas_status(const std::string& value)
-{
-    return
-        value == "rocblas_status_success"             ? rocblas_status_success :
-        value == "rocblas_status_invalid_handle"      ? rocblas_status_invalid_handle :
-        value == "rocblas_status_not_implemented"     ? rocblas_status_not_implemented :
-        value == "rocblas_status_invalid_pointer"     ? rocblas_status_invalid_pointer :
-        value == "rocblas_status_invalid_size"        ? rocblas_status_invalid_size :
-        value == "rocblas_status_memory_error"        ? rocblas_status_memory_error :
-        value == "rocblas_status_internal_error"      ? rocblas_status_internal_error :
-        value == "rocblas_status_perf_degraded"       ? rocblas_status_perf_degraded :
-        value == "rocblas_status_size_query_mismatch" ? rocblas_status_size_query_mismatch  :
-        value == "rocblas_status_size_increased"      ? rocblas_status_size_increased :
-        value == "rocblas_status_size_unchanged"      ? rocblas_status_size_unchanged  :
-        value == "rocblas_status_invalid_value"       ? rocblas_status_invalid_value :
-        value == "rocblas_status_continue"            ? rocblas_status_continue  :
-        value == "rocblas_status_check_numerics_fail" ? rocblas_status_check_numerics_fail :
-        static_cast<rocblas_status>(0);
-}
-
-#ifdef ROCSOLVER_WITH_ROCSPARSE
-inline rocsparse_status string2rocsparse_status(const std::string& value)
-{
-    return
-        value == "rocsparse_status_success"                 ? rocsparse_status_success :
-        value == "rocsparse_status_invalid_handle"          ? rocsparse_status_invalid_handle :
-        value == "rocsparse_status_not_implemented"         ? rocsparse_status_not_implemented :
-        value == "rocsparse_status_invalid_pointer"         ? rocsparse_status_invalid_pointer :
-        value == "rocsparse_status_invalid_size"            ? rocsparse_status_invalid_size :
-        value == "rocsparse_status_memory_error"            ? rocsparse_status_memory_error :
-        value == "rocsparse_status_internal_error"          ? rocsparse_status_internal_error :
-        value == "rocsparse_status_invalid_value"           ? rocsparse_status_invalid_value :
-        value == "rocsparse_status_arch_mismatch"           ? rocsparse_status_arch_mismatch :
-        value == "rocsparse_status_zero_pivot"              ? rocsparse_status_zero_pivot :
-        value == "rocsparse_status_not_initialized"         ? rocsparse_status_not_initialized  :
-        value == "rocsparse_status_type_mismatch"           ? rocsparse_status_type_mismatch :
-        value == "rocsparse_status_thrown_exception"        ? rocsparse_status_thrown_exception :
-        value == "rocsparse_status_requires_sorted_storage" ? rocsparse_status_requires_sorted_storage :
-        static_cast<rocsparse_status>(0);
-}
-#endif
 // clang-format on

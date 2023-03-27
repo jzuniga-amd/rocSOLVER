@@ -8,6 +8,29 @@
 #include <rocblas/rocblas.h>
 #include <rocsparse/rocsparse.h>
 
+constexpr auto rocsparse2string_status(rocsparse_status status)
+{
+    switch(status)
+    {
+    case rocsparse_status_success: return "rocsparse_status_success";
+    case rocsparse_status_invalid_handle: return "rocsparse_status_invalid_handle";
+    case rocsparse_status_not_implemented: return "rocsparse_status_not_implemented";
+    case rocsparse_status_invalid_pointer: return "rocsparse_status_invalid_pointer";
+    case rocsparse_status_invalid_size: return "rocsparse_status_invalid_size";
+    case rocsparse_status_memory_error: return "rocsparse_status_memory_error";
+    case rocsparse_status_internal_error: return "rocsparse_status_internal_error";
+    case rocsparse_status_invalid_value: return "rocsparse_status_invalid_value";
+    case rocsparse_status_arch_mismatch: return "rocsparse_status_arch_mismatch";
+    case rocsparse_status_zero_pivot: return "rocsparse_status_zero_pivot";
+    case rocsparse_status_not_initialized: return "rocsparse_status_not_initialized";
+    case rocsparse_status_type_mismatch: return "rocsparse_status_type_mismatch";
+    case rocsparse_status_thrown_exception: return "rocsparse_status_thrown_exception";
+    case rocsparse_status_requires_sorted_storage:
+        return "rocsparse_status_requires_sorted_storage";
+    }
+    return "invalid";
+}
+
 constexpr auto rocsparse2rocblas_status(rocsparse_status status)
 {
     switch(status)
