@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "testcode/auxiliary/testing_stein.hpp"
+#include "common/test/auxiliary/testing_stein.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "testcode/testing_managed_malloc.hpp"
+#include "common/test/testing_managed_malloc.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "testcode/lapack/testing_gels.hpp"
-#include "testcode/lapack/testing_gels_outofplace.hpp"
+#include "common/test/lapack/testing_gels.hpp"
+#include "common/test/lapack/testing_gels_outofplace.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

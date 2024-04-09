@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "testcode/lapack/testing_sygsx_hegsx.hpp"
+#include "common/test/lapack/testing_sygsx_hegsx.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

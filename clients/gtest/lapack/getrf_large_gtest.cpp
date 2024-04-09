@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "testcode/lapack/testing_getf2_getrf_npvt.hpp"
-#include "testcode/lapack/testing_getrf_large.hpp"
+#include "common/test/lapack/testing_getf2_getrf_npvt.hpp"
+#include "common/test/lapack/testing_getrf_large.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
