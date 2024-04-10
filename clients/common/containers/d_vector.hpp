@@ -34,9 +34,9 @@
 #include <fmt/ostream.h>
 #include <rocblas/rocblas.h>
 
-#include "common_host_helpers.hpp"
 #include "common/misc/data_initializer.hpp"
 #include "common/misc/rocblas_test.hpp"
+#include "common_host_helpers.hpp"
 
 /* ============================================================================================
  */
