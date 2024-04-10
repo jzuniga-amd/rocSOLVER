@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_sytxx_hetxx.hpp"
+#include "common/lapack/testing_sytxx_hetxx.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

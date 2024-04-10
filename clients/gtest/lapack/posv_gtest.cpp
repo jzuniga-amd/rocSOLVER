@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_posv.hpp"
+#include "common/lapack/testing_posv.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

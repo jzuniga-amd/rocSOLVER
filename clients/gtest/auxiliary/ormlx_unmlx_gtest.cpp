@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/auxiliary/testing_ormlx_unmlx.hpp"
+#include "common/auxiliary/testing_ormlx_unmlx.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

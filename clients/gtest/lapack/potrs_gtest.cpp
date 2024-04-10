@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_potrs.hpp"
+#include "common/lapack/testing_potrs.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

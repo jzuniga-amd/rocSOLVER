@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_gebd2_gebrd.hpp"
+#include "common/lapack/testing_gebd2_gebrd.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

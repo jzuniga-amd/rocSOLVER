@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_geqr2_geqrf.hpp"
+#include "common/lapack/testing_geqr2_geqrf.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

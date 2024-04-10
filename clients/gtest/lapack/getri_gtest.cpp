@@ -25,10 +25,10 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_getri.hpp"
-#include "common/test/lapack/testing_getri_npvt.hpp"
-#include "common/test/lapack/testing_getri_npvt_outofplace.hpp"
-#include "common/test/lapack/testing_getri_outofplace.hpp"
+#include "common/lapack/testing_getri.hpp"
+#include "common/lapack/testing_getri_npvt.hpp"
+#include "common/lapack/testing_getri_npvt_outofplace.hpp"
+#include "common/lapack/testing_getri_outofplace.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

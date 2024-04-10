@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/auxiliary/testing_ormbr_unmbr.hpp"
+#include "common/auxiliary/testing_ormbr_unmbr.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

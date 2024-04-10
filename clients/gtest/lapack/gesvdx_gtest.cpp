@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_gesvdx.hpp"
-#include "common/test/lapack/testing_gesvdx_notransv.hpp"
+#include "common/lapack/testing_gesvdx.hpp"
+#include "common/lapack/testing_gesvdx_notransv.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

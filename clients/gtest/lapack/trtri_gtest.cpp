@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_trtri.hpp"
+#include "common/lapack/testing_trtri.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

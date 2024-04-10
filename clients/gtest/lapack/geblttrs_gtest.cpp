@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_geblttrs_npvt.hpp"
-#include "common/test/lapack/testing_geblttrs_npvt_interleaved.hpp"
+#include "common/lapack/testing_geblttrs_npvt.hpp"
+#include "common/lapack/testing_geblttrs_npvt_interleaved.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

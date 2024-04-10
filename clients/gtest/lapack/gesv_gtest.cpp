@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/lapack/testing_gesv.hpp"
-#include "common/test/lapack/testing_gesv_outofplace.hpp"
+#include "common/lapack/testing_gesv.hpp"
+#include "common/lapack/testing_gesv_outofplace.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

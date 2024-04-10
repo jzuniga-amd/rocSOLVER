@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/refact/testing_csrrf_workflow.hpp"
+#include "common/refact/testing_csrrf_workflow.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

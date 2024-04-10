@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/auxiliary/testing_stebz.hpp"
+#include "common/auxiliary/testing_stebz.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

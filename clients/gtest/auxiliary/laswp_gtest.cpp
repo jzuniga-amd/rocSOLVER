@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/auxiliary/testing_laswp.hpp"
+#include "common/auxiliary/testing_laswp.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

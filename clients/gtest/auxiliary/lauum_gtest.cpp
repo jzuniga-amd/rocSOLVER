@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/auxiliary/testing_lauum.hpp"
+#include "common/auxiliary/testing_lauum.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;

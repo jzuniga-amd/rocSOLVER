@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "common/test/auxiliary/testing_stedc.hpp"
-#include "common/test/auxiliary/testing_stedcj.hpp"
+#include "common/auxiliary/testing_stedc.hpp"
+#include "common/auxiliary/testing_stedcj.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
