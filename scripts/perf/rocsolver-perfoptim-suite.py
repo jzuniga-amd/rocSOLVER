@@ -45,8 +45,8 @@ common = '--iters 3 --perf 1' #always do 3 iterations in perf mode
 """
 SYEVD tests are run, for the given precision and sizes, with vectors and without vectors
 """
-def syevd_suite(*, precision, sizenormal, sizebatch):
-    fn = 'syevd'
+def syevd_heevd_suite(*, precision, sizenormal, sizebatch):
+    fn = 'syevd' if precision == 's' or precision == 'd' else 'heevd'
     size = sizenormal
     for v in ['V', 'N']:
         if v == 'V': vv = 'yes'
@@ -59,8 +59,8 @@ def syevd_suite(*, precision, sizenormal, sizebatch):
 SYEVDX tests are run, for the given precision and sizes, with vectors and without vectors and
 computing 20, 60 and 100 percent of the eigenvalues
 """
-def syevdx_suite(*, precision, sizenormal, sizebatch):
-    fn = 'syevdx'
+def syevdx_heevdx_suite(*, precision, sizenormal, sizebatch):
+    fn = 'syevdx' if precision == 's' or precision == 'd' else 'heevdx'
     size=sizenormal
     for per in [20, 60, 100]:
         for v in ['V', 'N']:
@@ -75,8 +75,8 @@ def syevdx_suite(*, precision, sizenormal, sizebatch):
 """
 SYEVJ tests are run, for the given precision and sizes, with vectors and without vectors
 """
-def syevj_suite(*, precision, sizenormal, sizebatch):
-    fn = 'syevj'
+def syevj_heevj_suite(*, precision, sizenormal, sizebatch):
+    fn = 'syevj' if precision == 's' or precision == 'd' else 'heevj'
     size = sizenormal
     for v in ['V', 'N']:
         if v == 'V': vv = 'yes'
@@ -88,8 +88,8 @@ def syevj_suite(*, precision, sizenormal, sizebatch):
 """
 SYEVJBATCH tests are run, for the given precision and sizes, with vectors and without vectors
 """
-def syevjBatch_suite(*, precision, sizenormal, sizebatch):
-    fn = 'syevj_strided_batched'
+def syevj_heevjBatch_suite(*, precision, sizenormal, sizebatch):
+    fn = 'syevj_strided_batched' if precision == 's' or precision == 'd' else 'heevj_strided_batched'
     size = sizebatch
     for v in ['V', 'N']:
         if v == 'V': vv = 'yes'
@@ -174,10 +174,10 @@ def geqrf_suite(*, precision, sizenormal, sizebatch):
             yield (row, s, f'-f {fn} -r {precision} -n {n} -m {s} {common}')
 
 suites = {
-  'syevd': syevd_suite,
-  'syevdx': syevdx_suite,
-  'syevj': syevj_suite,
-  'syevjBatch': syevjBatch_suite,
+  'syevd_heevd': syevd_heevd_suite,
+  'syevdx_heevdx': syevdx_heevdx_suite,
+  'syevj_heevj': syevj_heevj_suite,
+  'syevj_heevjBatch': syevj_heevjBatch_suite,
   'gesvd': gesvd_suite,
   'gesvdj': gesvdj_suite,
   'gesvdjBatch': gesvdjBatch_suite,
@@ -238,15 +238,8 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable):
     for row, n, bench_args in benchmark_generator(precision=precision, sizenormal=sizenormal,
                                               sizebatch=sizebatch):
         out, err, exitcode = call_rocsolver_bench(bench_executable, bench_args)
-
         if exitcode != 0:
-            m = re.search(r".*Invalid combination.*precision.*", err)
-            if m:
-                vprint('WARNING: Skipping as suite does not support precision.')
-                return
-            else:
-                sys.exit("rocsolver-bench call failure: {}".format(err))
-
+            sys.exit("rocsolver-bench call failure: {}".format(err))
         time = float(out)
         row['gpu_time_us'] = time
         row['log_n'] = math.log10(n)
