@@ -33,6 +33,8 @@ import os
 import re
 import shlex
 import sys
+import io
+import shutil
 from itertools import chain, repeat
 from subprocess import Popen, PIPE
 
@@ -220,20 +222,66 @@ def call_rocsolver_bench(bench_executable, *args):
             process.returncode)
 
 """
+COMPARE_CASE return -1 if lhs < rhs, 0 if lhs == rhs, and 1 otherwise.
+"""
+def compare_case(lhs, rhs):
+    if lhs == rhs: return 0
+
+    if (lhs == 'small') or (lhs == 'medium' and rhs == 'large'):
+        return -1
+
+    return 1
+
+"""
+WRITE_ROW writes the given row to its proper location determined
+from comparing its values to the elements in incsv.
+"""
+remaining_rows = []
+def write_row(row, incsv, outcsv):
+    global remaining_rows
+    if not outcsv: return
+    if incsv and (list(incsv.fieldnames) == list(outcsv.fieldnames)) and ('case' in outcsv.fieldnames):
+        for r in incsv:
+            comp = compare_case(row['case'], r['case'])
+            if comp > 0:
+                # write rows in smaller case
+                outcsv.writerow(r)
+                continue
+            elif comp == 0:
+                # skip rows with equal case to overwrite
+                continue
+            remaining_rows.append(r)
+            break
+
+
+    outcsv.writerow(row)
+
+
+"""
+WRITE_REMAINING_ROWS writes the rows in incsv to outcsv.
+"""
+def write_remaining_rows(incsv, outcsv):
+    global remaining_rows
+    if not outcsv: return
+    if incsv and (list(incsv.fieldnames) == list(outcsv.fieldnames)) and ('case' in outcsv.fieldnames):
+        outcsv.writerows(remaining_rows)
+        outcsv.writerows(incsv)
+
+"""
 EXECUTE_BENCHMARKS collects the arguments for the benchmark client, calls
 the client, gets the resulting time, and put everything in file of screen
 """
-def execute_benchmarks(output_file, suite, precision, case, bench_executable):
+def execute_benchmarks(input_file, output_file, suite, precision, case, bench_executable):
     init = False
     benchmark_generator = suites[suite];
     sizenormal = list(chain(range(2, 64, 8), range(64, 256, 32), range(256, 1024, 64)))
     sizebatch = list(chain(zip(range(2, 64, 4), repeat(5000)), zip(range(72, 164, 8), repeat(2500))))
-    if case == 'medium' or case == 'large':
-        sizenormal += list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
-        sizebatch += list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
+    if case == 'medium':
+        sizenormal = list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
+        sizebatch = list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
     if case == 'large':
-        sizenormal += list(chain(range(4096, 8192, 256), range(8192, 12300, 512)))
-        sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
+        sizenormal = list(chain(range(4096, 8192, 256), range(8192, 12300, 512)))
+        sizebatch = list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
 
     for row, n, bench_args in benchmark_generator(precision=precision, sizenormal=sizenormal,
                                               sizebatch=sizebatch):
@@ -241,14 +289,17 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable):
         if exitcode != 0:
             sys.exit("rocsolver-bench call failure: {}".format(err))
         time = float(out)
+        row['case'] = case
         row['gpu_time_us'] = time
         row['log_n'] = math.log10(n)
         row['log_gpu_time_us'] = math.log10(time)
         if not init:
+            reader  = csv.DictReader(input_file) if input_file else None
             results = csv.DictWriter(output_file, fieldnames=row.keys(), extrasaction='raise', dialect='excel')
             results.writeheader()
             init = True
-        results.writerow(row)
+        write_row(row, reader, results)
+    write_remaining_rows(reader, results)
 
 
 #################################################
@@ -280,9 +331,20 @@ if __name__ == '__main__':
     setup_vprint(args)
 
     if args.output_path is not None:
+        input_file = None
+        try:
+            with open(args.output_path, 'r', encoding='utf-8') as file:
+                input_file = io.StringIO()
+                shutil.copyfileobj(file, input_file)
+                input_file.seek(0)
+        except:
+            pass
+
         with open(args.output_path, 'w', buffering=1, encoding='utf-8') as output_file:
-            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe)
+            execute_benchmarks(input_file, output_file, args.suite, args.precision, args.case, args.exe)
+
+        if input_file: input_file.close()
     else:
-        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe)
+        execute_benchmarks(None, sys.stdout, args.suite, args.precision, args.case, args.exe)
 
 

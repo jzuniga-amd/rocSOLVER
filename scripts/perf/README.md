@@ -41,11 +41,11 @@ z -> complex double precision
 (note: several can be selected)
 
 size cases to run
-valid options are: (default is large)
+valid options are: (default is medium)
 small  -> see definitions in rocsolver-perfoptim-suite.py for included size values
 medium -> see definitions in rocsolver-perfoptim-suite.py for included size values
 large  -> see definitions in rocsolver-perfoptim-suite.py for included size values
-(note: select only one as small is a sub-set of medium which is a sub-set of large)
+(note: several can be selected)
 ```
 
 For example, benchmarking `geqrf` with real single and real double precisions on the medium and small size cases would look like this:

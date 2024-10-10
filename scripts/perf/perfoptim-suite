@@ -28,17 +28,16 @@ Slist="syevd_heevd syevdx_heevdx syevj_heevj syevj_heevjBatch gesvd gesvdj gesvd
 Plist="s d c z"
 
 # size cases to run:
-# valid options are: (default is large)
+# valid options are: (default is medium)
 # small  -> see definitions in rocsolver-perfoptim-suite.py for included size values  
 # medium -> see definitions in rocsolver-perfoptim-suite.py for included size values
 # large  -> see definitions in rocsolver-perfoptim-suite.py for included size values
-# (note: select only one as small is a sub-set of medium which is a sub-set of large)
+# (note: several can be selected)
 Clist="small medium large"
  
 
 # Get an validate input arguments:
 error=true
-havecase=false
 suite=""
 precision=""
 case=""
@@ -47,7 +46,7 @@ if [ $# == 0 ]; then
     error=false
     suite=$Slist
     precision=$Plist
-    case="large"
+    case="medium"
 else
     args=$@
     for a in $args; do
@@ -85,14 +84,18 @@ else
         done  
         for c in $Clist; do
             if [ $a == $c ]; then
-                if $havecase; then
-                    error=true
-                else
-                    error=false
-                    havecase=true
+                new=true
+                error=false
+                for cc in $case; do
+                    if [ $a == $cc ]; then
+                        new=false
+                        break
+                    fi
+                done
+                if $new; then
                     case+="$c "
                 fi
-                break
+                break 
             fi
         done  
     done
@@ -109,7 +112,7 @@ if [ -z "$precision" ]; then
     precision=$Plist
 fi
 if [ -z "$case" ]; then
-    case="large"
+    case="medium"
 fi
 
 
