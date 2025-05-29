@@ -30,10 +30,10 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
- #pragma once
+#pragma once
 
- #include "rocblas.hpp"
- #include "rocsolver/rocsolver.h"
+#include "rocblas.hpp"
+#include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -42,7 +42,8 @@ void rocsolver_sb2st_hb2st_getMemorySize(const rocblas_int n,
                                          const rocblas_int nb,
                                          const rocblas_int batch_count,
                                          size_t* size_scalars)
-{}
+{
+}
 
 template <typename T, typename S>
 rocblas_status rocsolver_sb2st_hb2st_argCheck(rocblas_handle handle,
