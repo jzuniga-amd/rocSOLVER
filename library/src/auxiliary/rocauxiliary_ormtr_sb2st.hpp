@@ -652,8 +652,8 @@ static __global__ void ormtr_sb2st_coop_kernel(I const n,
     }
     else if((nblocks % 2) == 0)
     {
-        nbx = 4;
-        nby = nblocks / 4;
+        nbx = 2;
+        nby = nblocks / 2;
     }
 
     I const ibx = block_id % nbx;
