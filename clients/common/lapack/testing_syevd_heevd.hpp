@@ -156,9 +156,10 @@ void syevd_heevd_initData(const rocblas_handle handle,
                           std::vector<T>& A,
                           bool test = true)
 {
+    using S = decltype(std::real(T{}));
     if(CPU)
     {
-        rocblas_init<T>(hA, true);
+/*        rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
         for(rocblas_int b = 0; b < bc; ++b)
@@ -172,7 +173,47 @@ void syevd_heevd_initData(const rocblas_handle handle,
                     else
                         hA[b][i + j * lda] -= 4;
                 }
+            }*/
+
+        host_strided_batch_vector<S> hD(n, 1, n, bc);
+        host_strided_batch_vector<S> hE(n-1, 1, n-1, bc);
+        rocblas_init<S>(hD, true);
+        rocblas_init<S>(hE, false);
+
+//print_host_matrix(std::cout,"D",1,n,hD[0],1);
+//print_host_matrix(std::cout,"E",1,n-1,hE[0],1);
+
+
+        rocblas_int s1 = n * n;
+        rocblas_int sw = n * 32;
+        host_strided_batch_vector<T> Q1(s1, 1, s1, 1);
+        rocblas_init<T>(Q1, false);
+        std::vector<T> hW(sw);
+        std::vector<T> ipiv1(n);
+        cpu_geqrf<T>(n, n, Q1.data(), n, ipiv1.data(), hW.data(), sw);
+
+        for(rocblas_int b = 0; b < bc; ++b)
+        {
+            hA[b][0] = hD[b][0];
+            hA[b][lda] = hE[b][0];
+            for(rocblas_int i = 1; i < n-1; i++)
+            {
+                hA[b][i + (i-1)*lda] = hE[b][i-1];
+                hA[b][i + i*lda] = hD[b][i];
+                hA[b][i + (i+1)*lda] = hE[b][i];
             }
+            hA[b][n-1 + (n-2)*lda] = hE[b][n-2];
+            hA[b][n-1 + (n-1)*lda] = hD[b][n-1];
+
+//print_host_matrix(std::cout,"A1",n,n,hA[0],lda);
+
+
+            cpu_ormqr_unmqr<T>(rocblas_side_left, rocblas_operation_transpose, n, n, n,
+                               Q1.data(), n, ipiv1.data(), hA[b], n, hW.data(), sw);
+            cpu_ormqr_unmqr<T>(rocblas_side_right, rocblas_operation_none, n, n, n, Q1.data(),
+                               n, ipiv1.data(), hA[b], n, hW.data(), sw);
+
+//print_host_matrix(std::cout,"A2",n,n,hA[0],lda);
 
             // make copy of original data to test vectors if required
             if(test && evect == rocblas_evect_original)
@@ -552,7 +593,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
@@ -592,7 +633,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,

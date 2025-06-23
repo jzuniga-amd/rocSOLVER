@@ -1463,6 +1463,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
             // Order the elements in tmpd and zz using a simple parallel selection/bubble sort.
             // This will allow us to find initial intervals for eigenvalue guesses
+
+/*if(iam==0 && sid==0 && mid==0 && tidb==0)
+{
+    printf("tsz=%d in round %d\n",tsz,k);
+    for(int hh=0; hh<n; ++hh)
+        printf("%2.15f ",tmpd[hh]);
+    printf("\n");
+    for(int hh=0; hh<n; ++hh)
+        printf("%d ",per[hh]);
+    printf("\n");
+    printf("\n");
+}*/
             for(int i = 0; i < tsz; ++i)
             {
                 if(i < dd)
@@ -1494,6 +1506,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                 }
                 __syncthreads();
             }
+/*if(iam==0 && sid==0 && mid==0 && tidb==0)
+{
+    for(int hh=0; hh<n; ++hh)
+        printf("%2.15f ",tmpd[hh]);
+    printf("\n");
+    for(int hh=0; hh<n; ++hh)
+        printf("%d ",per[hh]);
+    printf("\n");
+    printf("\n");
+}*/
 
             // make dd copies of the non-deflated ordered diagonal elements
             // (i.e. the poles of the secular eqn) so that the distances to the

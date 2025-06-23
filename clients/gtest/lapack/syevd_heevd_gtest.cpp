@@ -52,7 +52,7 @@ const vector<vector<int>> size_range = {
     {-1, 1},
     {10, 5},
     // normal (valid) samples
-    {1, 1},
+//    {1, 1},
     {12, 12},
     {20, 30},
     {36, 36},

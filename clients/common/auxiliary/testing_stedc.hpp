@@ -113,16 +113,19 @@ void stedc_initData(const rocblas_handle handle,
         using S = decltype(std::real(T{}));
 
         // if the matrix is too small (n < 4), simply initialize D and E
-        if(n < 4)
-        {
+//        if(n < 4)
+//        {
             rocblas_init<S>(hD, true);
-            rocblas_init<S>(hE, true);
-        }
+            rocblas_init<S>(hE, false);
+//        }
+
+//print_host_matrix(std::cout,"D",1,n,hD[0],1);
+//print_host_matrix(std::cout,"E",1,n-1,hE[0],1);
 
         // otherwise, the marix will be divided in exactly 2 independent blocks, if the size is even,
         // or 3 if the size is odd. The 2 main independent blocks will have the same eigenvalues.
         // The last block, when the size is odd, will have eigenvalue equal 1.
-        else
+/*        else
         {
             rocblas_int N1 = n / 2;
             rocblas_int E = n - 2 * N1;
@@ -211,7 +214,7 @@ void stedc_initData(const rocblas_handle handle,
             // if there is a third independent block, initialize it with 1
             if(E == 1)
                 hD[0][n - 1] = 1;
-        }
+        }*/
 
         // initialize C to the identity matrix
         if(evect == rocblas_evect_original)
@@ -522,7 +525,7 @@ void testing_stedc(Arguments& argus)
                           hInfo, hInfoRes, &max_err, &max_errv);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stedc_getPerfData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
