@@ -1193,8 +1193,53 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
             }
             __syncthreads();
 
+
             // now deflate repeated values
-            rocblas_int sz_even, sz_half, base, top, com;
+            S piv, val;
+            for(int i = 0; i < sz; ++i)
+            {
+                __syncthreads();
+
+                int base = i + in;
+                if(idd[base] == 1)
+                {
+                    piv = D[base];
+                    for(int j = i + 1; j < sz; ++j)
+                    {
+                        int top = j + in;
+                        val = D[top];
+                        if(idd[top] == 1 && std::abs(piv - val) <= tol)
+                        {
+                            // rotation to eliminate component in z
+                            g = z[top];
+                            f = z[base];
+                            lartg(f, g, c, s, rr);
+                            
+                            // update C with the rotation
+                            for(int ii = tidb; ii < n; ii += hipBlockDim_x)
+                            {
+                                valf = C[ii + base * ldc];
+                                valg = C[ii + top * ldc];
+                                C[ii + base * ldc] = valf * c - valg * s;
+                                C[ii + top * ldc] = valf * s + valg * c;
+                            }
+                            __syncthreads();
+
+                            // deflated ev because it is repeated
+                            if(tidb == 0)
+                            {
+                                idd[top] = 0;
+                                z[base] = rr;
+                                z[top] = 0;
+                            }
+                        }
+                    }
+                }
+            }
+
+
+
+/*            rocblas_int sz_even, sz_half, base, top, com;
             sz_even = (sz % 2 == 1) ? sz + 1 : sz;
             sz_half = sz_even / 2;
 
@@ -1251,7 +1296,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                     }
                     __syncthreads();
                 }
-            }
+            }*/
             /* ----------------------------------------------------------------- */
 
             // 3d.1. Organize data with non-deflated values to prepare secular equation
