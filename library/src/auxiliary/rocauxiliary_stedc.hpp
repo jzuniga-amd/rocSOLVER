@@ -43,7 +43,7 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define STEDC_BDIM 512 // Number of threads per thread-block used in main stedc kernels
+#define STEDC_BDIM 1024 // Number of threads per thread-block used in main stedc kernels
 #define MAXITERS 50 // Max number of iterations for root finding method
 
 // TODO: using macro STEDC_EXTERNAL_GEMM = true for now. In the future we can pass
@@ -1195,6 +1195,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
 
             // now deflate repeated values
+
+/** option a (old code): sequential search + update elements of vectors in parallel. 
+    This option seems to solve accuracy issues, but having many threads updating elements of 
+    vectors in parallel does not counteract the sequential search which is O(n^2). 
+    This is the slowest option **/
+
             S piv, val;
             for(int i = 0; i < sz; ++i)
             {
@@ -1238,6 +1244,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
             }
 
 
+/** option b (current code): search done in parallel -by pairs- + updates to the vectors element by element
+    Having the search part parallelized, this option is way faster; however, it seems to be the
+    cause of the accuracy issues as in some cases some necessary deflations are not performed **/
 
 /*            rocblas_int sz_even, sz_half, base, top, com;
             sz_even = (sz % 2 == 1) ? sz + 1 : sz;
@@ -1297,6 +1306,76 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                     __syncthreads();
                 }
             }*/
+
+
+/** option c: organize threads in a 2D grid to do parallel search but also update elements 
+    of vectors in parallel. This is fastest option; unfortunatelly, it still has the accuracy
+    issues **/
+
+/*            int dimx = 2;
+            int dimy = hipBlockDim_x / dimx;
+            int yid = tidb / dimx;
+            int xid = tidb % dimx;
+
+            rocblas_int sz_even, sz_half, base, top, com;
+            sz_even = (sz % 2 == 1) ? sz + 1 : sz;
+            sz_half = sz_even / 2;
+
+            // the number of rounds needed is sz_even - 1
+            for(int r = 0; r < sz_even - 1; ++r)
+            {
+                // in each round threads analyze pairs of values in parallel
+                // sz_half pairs are needed
+                for(int i = yid; i < sz_half; i += dimy)
+                {
+                    // determine pair of values (base, top)
+                    com = 2 * (i - r);
+                    base = (i == 0)             ? 0
+                        : (r < i)               ? com
+                        : (r > i - 1 + sz_half) ? 2 * (sz_even - 1) + com
+                                                : 1 - com;
+
+                    com = 2 * (i + r);
+                    top = (r < sz_half - i)     ? 1 + com
+                        : (r > sz_even - 2 - i) ? 3 - 2 * sz_even + com
+                                                : 2 * (sz_even - 1) - com;
+
+                    if(base > top)
+                    {
+                        com = base;
+                        base = top;
+                        top = com;
+                    }
+
+                    // compare values and deflate if needed
+                    base += in;
+                    top += in;
+                    if(idd[base] == 1 && idd[top] == 1 && top < sz + in)
+                    {
+                        if(abs(D[base] - D[top]) <= tol)
+                        {
+                            // deflated ev because it is repeated
+                            idd[top] = 0;
+                            // rotation to eliminate component in z
+                            g = z[top];
+                            f = z[base];
+                            lartg(f, g, c, s, rr);
+                            z[base] = rr;
+                            z[top] = 0;
+                            // update C with the rotation
+                            for(int ii = xid; ii < n; ii += dimx)
+                            {
+                                valf = C[ii + base * ldc];
+                                valg = C[ii + top * ldc];
+                                C[ii + base * ldc] = valf * c - valg * s;
+                                C[ii + top * ldc] = valf * s + valg * c;
+                            }
+                        }
+                    }
+                    __syncthreads();
+                }
+            }*/
+
             /* ----------------------------------------------------------------- */
 
             // 3d.1. Organize data with non-deflated values to prepare secular equation
