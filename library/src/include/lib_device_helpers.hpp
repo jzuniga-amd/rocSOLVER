@@ -1330,7 +1330,7 @@ __device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT
             // find middle point in the interval [d, u]
             m = (u - d - 1) / 2 + 1 + d;
             test = X[m - 1];
-
+    
             // correct interval accordingly
             if(test >= val)
                 u = m - 1;
