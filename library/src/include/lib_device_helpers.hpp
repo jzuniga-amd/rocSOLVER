@@ -1315,50 +1315,95 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
     If STRICT = false, it returns the number of elements in 'X' that are smaller than or 
     equal to 'val' **/
 template<typename T>
-__device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT)
+__device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT, bool REVERSE)
 {
     rocblas_int d = 1;
     rocblas_int u = n;
     rocblas_int m;
     T test;
 
-    if(STRICT)
+    if(REVERSE)
     {
-        // while there is still an interval to search
-        while(d != u)
+        if(STRICT)
         {
-            // find middle point in the interval [d, u]
-            m = (u - d - 1) / 2 + 1 + d;
-            test = X[m - 1];
-    
-            // correct interval accordingly
-            if(test >= val)
-                u = m - 1;
-            else
-                d = m;
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[n - m];
+
+                // correct interval accordingly
+                if(test >= val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[n - d];
+            return test >= val ? 0 : d;
         }
-        // return result
-        test = X[d - 1];
-        return test >= val ? 0 : d;
+        else
+        {
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[n - m];
+
+                // correct interval accordingly
+                if(test > val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[n - d];
+            return test > val ? 0 : d;
+        }
     }
+
     else
     {
-        // while there is still an interval to search
-        while(d != u)
+        if(STRICT)
         {
-            // find middle point in the interval [d, u]
-            m = (u - d - 1) / 2 + 1 + d;
-            test = X[m - 1];
-
-            // correct interval accordingly
-            if(test > val)
-                u = m - 1;
-            else
-                d = m;
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[m - 1];
+    
+                // correct interval accordingly
+                if(test >= val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[d - 1];
+            return test >= val ? 0 : d;
         }
-        // return result
-        test = X[d - 1];
-        return test > val ? 0 : d;
+        else
+        {
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[m - 1];
+    
+                // correct interval accordingly
+                if(test > val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[d - 1];
+            return test > val ? 0 : d;
+        }
     }
 } 
 
