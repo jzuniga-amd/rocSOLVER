@@ -376,151 +376,154 @@ void stedc_default_initData(const rocblas_handle handle,
     {
         using S = decltype(std::real(T{}));
 
-        hD[0][0] =   1.92753357034913209;
-        hD[0][1] =   2.07246642965086725;
-        hD[0][2] =   2.73196618566814386;
-        hD[0][3] =   2.25416816370981676;
-        hD[0][4] =   1.01386565062204159;
-        hD[0][5] =   2.41429924311683131;
-        hD[0][6] =   2.58570075688316781;
-        hD[0][7] =  -1.62005915258370292;
-        hD[0][8] =   1.45742500173831457;
-        hD[0][9] =   3.16263415084538835;
-        hD[0][10] =   2.01204993620197836;
-        hD[0][11] =   2.98795006379802164;
-        hD[0][12] =   0.30470626361906283;
-        hD[0][13] =   0.1885087851531192;
-        hD[0][14] =   1.50678495122781841;
-        hD[0][15] =   1.77347161157687916;
-        hD[0][16] =   1.58814777830053266;
-        hD[0][17] =   1.63838061012258773;
-        hD[0][18] =  -1.358211775324369;
-        hD[0][19] =   1.26329060394258286;
-        hD[0][20] =   0.09492117138178557;
-
-        hE[0][0] =  -0.25925864734763121;
-        hE[0][1] =   1;
-        hE[0][2] =  -0.93941738783257778;
-        hE[0][3] =  -0.22175899704358948;
-        hE[0][4] =  -1;
-        hE[0][5] =  -1.49754979225054563;
-        hE[0][6] =  -1;
-        hE[0][7] =  -0.95113171054750978;
-        hE[0][8] =  -0.40645896550279997;
-        hE[0][9] =   2;
-        hE[0][10] =  -0.15477296741189878;
-        hE[0][11] =   1;
-        hE[0][12] =   1.4261891709592014;
-        hE[0][13] =  -1.256218326676529;
-        hE[0][14] =   1;
-        hE[0][15] =  -1.06425644211708037;
-        hE[0][16] =  -0.57148600477942435;
-        hE[0][17] =  -1;
-        hE[0][18] =  -1.09381627996557929;
-        hE[0][19] =  -0.6610230845429605;
-
-
-
-/*        // if the matrix is too small (n < 4), simply initialize D and E
-        if(n < 4)
+        if(n == 21)
         {
-            rocblas_init<S>(hD, true);
-            rocblas_init<S>(hE, true);
+            hD[0][0] =   1.92753357034913209;
+            hD[0][1] =   2.07246642965086725;
+            hD[0][2] =   2.73196618566814386;
+            hD[0][3] =   2.25416816370981676;
+            hD[0][4] =   1.01386565062204159;
+            hD[0][5] =   2.41429924311683131;
+            hD[0][6] =   2.58570075688316781;
+            hD[0][7] =  -1.62005915258370292;
+            hD[0][8] =   1.45742500173831457;
+            hD[0][9] =   3.16263415084538835;
+            hD[0][10] =   2.01204993620197836;
+            hD[0][11] =   2.98795006379802164;
+            hD[0][12] =   0.30470626361906283;
+            hD[0][13] =   0.1885087851531192;
+            hD[0][14] =   1.50678495122781841;
+            hD[0][15] =   1.77347161157687916;
+            hD[0][16] =   1.58814777830053266;
+            hD[0][17] =   1.63838061012258773;
+            hD[0][18] =  -1.358211775324369;
+            hD[0][19] =   1.26329060394258286;
+            hD[0][20] =   0.09492117138178557;
+    
+            hE[0][0] =  -0.25925864734763121;
+            hE[0][1] =   1;
+            hE[0][2] =  -0.93941738783257778;
+            hE[0][3] =  -0.22175899704358948;
+            hE[0][4] =  -1;
+            hE[0][5] =  -1.49754979225054563;
+            hE[0][6] =  -1;
+            hE[0][7] =  -0.95113171054750978;
+            hE[0][8] =  -0.40645896550279997;
+            hE[0][9] =   2;
+            hE[0][10] =  -0.15477296741189878;
+            hE[0][11] =   1;
+            hE[0][12] =   1.4261891709592014;
+            hE[0][13] =  -1.256218326676529;
+            hE[0][14] =   1;
+            hE[0][15] =  -1.06425644211708037;
+            hE[0][16] =  -0.57148600477942435;
+            hE[0][17] =  -1;
+            hE[0][18] =  -1.09381627996557929;
+            hE[0][19] =  -0.6610230845429605;
         }
-
-        // otherwise, the marix will be divided in exactly 2 independent blocks, if the size is even,
-        // or 3 if the size is odd. The 2 main independent blocks will have the same eigenvalues.
-        // The last block, when the size is odd, will have eigenvalue equal 1.
         else
         {
-            rocblas_int N1 = n / 2;
-            rocblas_int E = n - 2 * N1;
-
-            // a. initialize the eigenvalues for the uppermost sub-blocks of the main independent blocks.
-            // The second sub-block will have some repeated eigenvalues in order to test the deflation process
-            S d;
-            rocblas_int NN1 = N1 / 2;
-            rocblas_int NN2 = N1 - NN1;
-            rocblas_int s1 = NN1 * NN1;
-            rocblas_int s2 = NN2 * NN2;
-            rocblas_int sw = NN2 * 32;
-            std::vector<S> A1(s1);
-            std::vector<S> A2(s2);
-            for(rocblas_int i = 0; i < NN1; ++i)
+            // if the matrix is too small (n < 4), simply initialize D and E
+            if(n < 4)
             {
-                for(rocblas_int j = 0; j < NN1; ++j)
-                {
-                    if(i == j)
-                    {
-                        d = (i + 1) / S(NN1);
-                        A1[i + i * NN1] = d;
-                        A2[i + i * NN2] = (i % 2 == 0) ? d : -d;
-                    }
-                    else
-                    {
-                        A1[i + j * NN1] = 0;
-                        A2[i + j * NN2] = 0;
-                    }
-                }
+                rocblas_init<S>(hD, true);
+                rocblas_init<S>(hE, true);
             }
-            if(NN2 > NN1)
+    
+            // otherwise, the marix will be divided in exactly 2 independent blocks, if the size is even,
+            // or 3 if the size is odd. The 2 main independent blocks will have the same eigenvalues.
+            // The last block, when the size is odd, will have eigenvalue equal 1.
+            else
             {
+                rocblas_int N1 = n / 2;
+                rocblas_int E = n - 2 * N1;
+    
+                // a. initialize the eigenvalues for the uppermost sub-blocks of the main independent blocks.
+                // The second sub-block will have some repeated eigenvalues in order to test the deflation process
+                S d;
+                rocblas_int NN1 = N1 / 2;
+                rocblas_int NN2 = N1 - NN1;
+                rocblas_int s1 = NN1 * NN1;
+                rocblas_int s2 = NN2 * NN2;
+                rocblas_int sw = NN2 * 32;
+                std::vector<S> A1(s1);
+                std::vector<S> A2(s2);
                 for(rocblas_int i = 0; i < NN1; ++i)
                 {
-                    A2[NN1 + i * NN2] = 0;
-                    A2[i + NN1 * NN2] = 0;
+                    for(rocblas_int j = 0; j < NN1; ++j)
+                    {
+                        if(i == j)
+                        {
+                            d = (i + 1) / S(NN1);
+                            A1[i + i * NN1] = d;
+                            A2[i + i * NN2] = (i % 2 == 0) ? d : -d;
+                        }
+                        else
+                        {
+                            A1[i + j * NN1] = 0;
+                            A2[i + j * NN2] = 0;
+                        }
+                    }
                 }
-                A2[NN1 + NN1 * NN2] = 0;
+                if(NN2 > NN1)
+                {
+                    for(rocblas_int i = 0; i < NN1; ++i)
+                    {
+                        A2[NN1 + i * NN2] = 0;
+                        A2[i + NN1 * NN2] = 0;
+                    }
+                    A2[NN1 + NN1 * NN2] = 0;
+                }
+    
+                // b. find the corresponding tridiagonal matrices containing the setup eigenvalues of each sub-block
+                // first find random orthogonal matrices Q1 and Q2
+                Sh Q1(s1, 1, s1, 1);
+                Sh Q2(s2, 1, s2, 1);
+                rocblas_init<S>(Q1, true);
+                rocblas_init<S>(Q2, true);
+                std::vector<S> hW(sw);
+                std::vector<S> ipiv1(NN1);
+                std::vector<S> ipiv2(NN2);
+                cpu_geqrf<S>(NN1, NN1, Q1.data(), NN1, ipiv1.data(), hW.data(), sw);
+                cpu_geqrf<S>(NN2, NN2, Q2.data(), NN2, ipiv2.data(), hW.data(), sw);
+                // now multiply the orthogonal matrices by the diagonals A1 and A2 to hide the eigenvalues
+                cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN1, NN1, NN1,
+                                   Q1.data(), NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
+                cpu_ormqr_unmqr<S>(rocblas_side_right, rocblas_operation_none, NN1, NN1, NN1, Q1.data(),
+                                   NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
+                cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN2, NN2, NN2,
+                                   Q2.data(), NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
+                cpu_ormqr_unmqr<S>(rocblas_side_right, rocblas_operation_none, NN2, NN2, NN2, Q2.data(),
+                                   NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
+                // finally, perform tridiagonalization
+                cpu_sytrd_hetrd<S>(rocblas_fill_upper, NN1, A1.data(), NN1, hD[0], hE[0], ipiv1.data(),
+                                   hW.data(), sw);
+                cpu_sytrd_hetrd<S>(rocblas_fill_upper, NN2, A2.data(), NN2, hD[0] + NN1, hE[0] + NN1,
+                                   ipiv2.data(), hW.data(), sw);
+    
+                // c. integrate blocks into final matrix
+                // integrate the 2 sub-blocks into the first independent block
+                hE[0][NN1 - 1] = 1;
+                hD[0][NN1 - 1] += 1;
+                hD[0][NN1] += 1;
+                // copy the independent block over
+                for(rocblas_int i = 0; i < N1; ++i)
+                {
+                    hD[0][N1 + i] = hD[0][i];
+                    hE[0][N1 + i] = hE[0][i];
+                }
+                hE[0][N1 - 1] = 0;
+                hE[0][2 * N1 - 1] = 0;
+                // integrate the 2 sub-blocks into the second independent block
+                // (using negative p to test secular eqn algorithm)
+                hE[0][N1 + NN1 - 1] = -1;
+                hD[0][N1 + NN1 - 1] -= 2;
+                hD[0][N1 + NN1] -= 2;
+                // if there is a third independent block, initialize it with 1
+                if(E == 1)
+                    hD[0][n - 1] = 1;
             }
-
-            // b. find the corresponding tridiagonal matrices containing the setup eigenvalues of each sub-block
-            // first find random orthogonal matrices Q1 and Q2
-            Sh Q1(s1, 1, s1, 1);
-            Sh Q2(s2, 1, s2, 1);
-            rocblas_init<S>(Q1, true);
-            rocblas_init<S>(Q2, true);
-            std::vector<S> hW(sw);
-            std::vector<S> ipiv1(NN1);
-            std::vector<S> ipiv2(NN2);
-            cpu_geqrf<S>(NN1, NN1, Q1.data(), NN1, ipiv1.data(), hW.data(), sw);
-            cpu_geqrf<S>(NN2, NN2, Q2.data(), NN2, ipiv2.data(), hW.data(), sw);
-            // now multiply the orthogonal matrices by the diagonals A1 and A2 to hide the eigenvalues
-            cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN1, NN1, NN1,
-                               Q1.data(), NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
-            cpu_ormqr_unmqr<S>(rocblas_side_right, rocblas_operation_none, NN1, NN1, NN1, Q1.data(),
-                               NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
-            cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN2, NN2, NN2,
-                               Q2.data(), NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
-            cpu_ormqr_unmqr<S>(rocblas_side_right, rocblas_operation_none, NN2, NN2, NN2, Q2.data(),
-                               NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
-            // finally, perform tridiagonalization
-            cpu_sytrd_hetrd<S>(rocblas_fill_upper, NN1, A1.data(), NN1, hD[0], hE[0], ipiv1.data(),
-                               hW.data(), sw);
-            cpu_sytrd_hetrd<S>(rocblas_fill_upper, NN2, A2.data(), NN2, hD[0] + NN1, hE[0] + NN1,
-                               ipiv2.data(), hW.data(), sw);
-
-            // c. integrate blocks into final matrix
-            // integrate the 2 sub-blocks into the first independent block
-            hE[0][NN1 - 1] = 1;
-            hD[0][NN1 - 1] += 1;
-            hD[0][NN1] += 1;
-            // copy the independent block over
-            for(rocblas_int i = 0; i < N1; ++i)
-            {
-                hD[0][N1 + i] = hD[0][i];
-                hE[0][N1 + i] = hE[0][i];
-            }
-            hE[0][N1 - 1] = 0;
-            hE[0][2 * N1 - 1] = 0;
-            // integrate the 2 sub-blocks into the second independent block
-            // (using negative p to test secular eqn algorithm)
-            hE[0][N1 + NN1 - 1] = -1;
-            hD[0][N1 + NN1 - 1] -= 2;
-            hD[0][N1 + NN1] -= 2;
-            // if there is a third independent block, initialize it with 1
-            if(E == 1)
-                hD[0][n - 1] = 1;
-        }*/
+        }
 
         // initialize C to the identity matrix
         if(evect == rocblas_evect_original)

@@ -1322,6 +1322,10 @@ __device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT
     rocblas_int m;
     T test;
 
+    // quick return
+    if(n == 0)
+        return 0;
+    
     if(REVERSE)
     {
         if(STRICT)
