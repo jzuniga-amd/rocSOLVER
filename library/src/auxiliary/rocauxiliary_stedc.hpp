@@ -500,42 +500,104 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
         shmaxd[tx] = nf;
         nrs[tx] = nr;
     }
-    __syncthreads();
-
-
-    // 4. Organize data with non-deflated values to prepare secular equation
-    // ------------------------------------------------------------------------ 
-    nr = (tx < blks) ? shmaxz[tx - bx] : 0;
-    nf = (tx < blks) ? shmaxd[tx - bx] : 0;
-
-    // define shifted arrays:
-    // tmpd will contain 'nr' copies of the list of 'nr' non-deflated values in 'ev'
-    // Z contains the corresponding non-zero elements of the rank-1 modif vector
-    S* tmpd = temps + pin * n;
-    S* ev = evr + pin;   
-    S* Z = z + pin; 
-
-    // if 'p' is negative, the values are copied as negative in reverse order 
-    // as required by the secular equation solvers
-    bool pneg = (p < 0);
-    rocblas_int sig = pneg ? -1 : 1;
-    rocblas_int start = pneg ? nr - 1 : 0;
-
-    for(int j = 0; j < nr; ++j)
-    {
-        for(int ii = bx; ii < nr; ii += dm2)
-        {
-            int i = start + sig * ii;
-            tmpd[i + j * n] = sig * ev[ii];
-        }
-    } 
-    for(int ii = bx; ii < nr; ii += dm2)
-    {
-        int i = start + sig * ii;
-        Z[i] = ztmp[ii + pin];
-    }    
 }
 
+//--------------------------------------------------------------------------------------//
+/** STEDC_MERGEPREPARE_KERNEL prepares the components for the secular equations of every 
+    pair of sub-blocks that need to be merged.
+        - Call this kernel with batch_count groups in z, and as many groups as needed in 
+          x and y to cover the n rows and columns **/
+template <typename S>
+ROCSOLVER_KERNEL void 
+stedc_mergePrepare_kernel(const rocblas_int levs,
+                          const rocblas_int blks,
+                          const rocblas_int k,
+                          const rocblas_int n,
+                          S* EE,
+                          const rocblas_stride strideE,
+                          S* tmpzA,
+                          S* vecsA,
+                          rocblas_int* splitsA,
+                          const S eps)
+{
+    // threads and groups indices
+    // batch instance id
+    rocblas_int bid = hipBlockIdx_z;
+    rocblas_int dimr = hipGridDim_x * hipBlockDim_x;
+    rocblas_int dimc = hipGridDim_y * hipBlockDim_y;
+    // row id
+    rocblas_int rid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    // column/vector id
+    rocblas_int cid = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+
+    // select batch instance to work with
+    S* E = EE + bid * strideE;
+
+    // temporary arrays in global memory
+    rocblas_int* splits = splitsA + bid * (5 * n + blks);
+    // the sub-blocks sizes
+    rocblas_int* ns = splits + n;
+    // the sub-blocks initial positions
+    rocblas_int* ps = ns + n;
+    // if idd[i] = 0, the value in position i has been deflated
+    rocblas_int* idd = ps + n;
+    // container of permutations when solving the secular eqns
+    rocblas_int* pers = idd + n;
+    rocblas_int* nrs = pers + n;
+    // the rank-1 modification vectors in the merges
+    S* z = tmpzA + bid * (3 * n);
+    // roots of secular equations
+    S* evr = z + n;
+    S* evf = z + 2*n;
+    // updated eigenvectors after merges
+    S* vecs = vecsA + bid * 2 * (n * n);
+    // temp values during the merges
+    S* temps = vecs + (n * n);
+    S* ztmp = vecs + 2 * n;
+
+    rocblas_int dm = 1 << k;
+    rocblas_int dm2 = dm << 1;
+
+    for(int jj = cid; jj < n; jj += dimc)
+    {
+        // column 'jj' belongs to sub-block 'bx' and thus forms part of 
+        // the new sub-block 'nbx'
+        rocblas_int bx = bisearch(jj, ps, blks, false, false) - 1;
+        rocblas_int nbx = bx / dm2;
+        
+        // the new sub-block starts at 'pin', the middle point is 'pmid', and
+        // it ends at 'pout'. Element 'p' is found at middle point
+        rocblas_int tmp = nbx * dm2;
+        rocblas_int pin = ps[tmp];
+        rocblas_int pmid = ps[tmp + dm];
+        tmp += dm2;
+        rocblas_int pout = tmp < blks ? ps[tmp] : n;
+        S p = 2 * E[pmid - 1];
+        rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block            
+        rocblas_int j = jj - pin;
+
+        if(j < nr)
+        {
+            S* tmpd = temps + pin * n;
+            S* ev = evr + pin;
+            S* Z = z + pin;
+
+            // if 'p' is negative, the values are copied as negative in reverse order
+            // as required by the secular equation solvers
+            bool pneg = (p < 0);
+            rocblas_int sig = pneg ? -1 : 1;
+            rocblas_int start = pneg ? nr - 1 : 0;
+
+            for(int i = rid; i < nr; i += dimr)
+            {
+                int id = start + sig * i;
+                tmpd[i + j * n] = sig * ev[id];
+                if(j == 0)
+                    Z[i] = ztmp[id + pin];
+            }
+        }
+    }
+}
 
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEROTATE_KERNEL performs rotation of vectors corresponding to deflations
@@ -1605,8 +1667,8 @@ print_device_matrix(std::cout,"ps",1,n,splits+2*n,1);
         for(rocblas_int k = 0; k < levs; ++k) ////////////////////////////////////////////////////////////////////////////// k < levs
         {
 
-hipEvent_t merge_events[13];            
-for(int i = 0; i < 13; i++)
+hipEvent_t merge_events[14];            
+for(int i = 0; i < 14; i++)
     HIP_CHECK(hipEventCreate(&merge_events[i]));
 
 
@@ -1647,13 +1709,28 @@ print_device_matrix(std::cout,"size of non-deflated",1,blks,splits+5*n,1);
 print_device_matrix(std::cout,"ids after deflation",1,n,splits+3*n,1);
 print_device_matrix(std::cout,"non deflated values",1,n,tmpz+n,1);
 print_device_matrix(std::cout,"deflated values",1,n,tmpz+2*n,1);
-print_device_matrix(std::cout,"Z deflated",1,n,tmpz,1);
 print_device_matrix(std::cout,"dcount of rotations",1,n,splits,1);
 print_device_matrix(std::cout,"vecs after deflate",n,n,tempgemm,n);
 print_device_matrix(std::cout,"temps after deflate",n,n,tempgemm+n*n,n);
 }
 
 HIP_CHECK(hipEventRecord(merge_events[2], stream));
+            ROCSOLVER_LAUNCH_KERNEL((stedc_mergePrepare_kernel<S>), dim3(groupsn, groupsn, batch_count), 
+                                    dim3(BS2,BS2), 0, stream, levs, blks, k, n, E + shiftE, strideE,
+                                    tmpz, tempgemm, splits, eps);
+
+if(print_debug)
+{
+printf("after mergePrepare:\n");
+printf("---------------------\n");
+print_device_matrix(std::cout,"vecs after prepare",n,n,tempgemm,n);
+print_device_matrix(std::cout,"temps after prepare",n,n,tempgemm+n*n,n);
+print_device_matrix(std::cout,"Z for secular eqns",1,n,tmpz,1);
+}
+
+
+
+HIP_CHECK(hipEventRecord(merge_events[3], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeRotate_kernel<S>), dim3(n, batch_count),
                                     dim3(STEDC_BDIM),
                                     0, stream, levs, blks, k, n,
@@ -1666,12 +1743,12 @@ print_device_matrix(std::cout,"V after rotate",n,n,V,ldv);
 }
 
             // b. solve secular eq to find merged eigenvalues
-HIP_CHECK(hipEventRecord(merge_events[3], stream));
+HIP_CHECK(hipEventRecord(merge_events[4], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, E + shiftE, strideE,
                                     tmpz, tempgemm, splits, eps, ssfmin, ssfmax);
 
-HIP_CHECK(hipEventRecord(merge_events[4], stream));
+HIP_CHECK(hipEventRecord(merge_events[5], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeReinsert_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, D + shiftD, strideD, E + shiftE, strideE,
                                     tmpz, tempgemm, splits);
@@ -1689,14 +1766,14 @@ print_device_matrix(std::cout,"temps after values",n,n,tempgemm+n*n,n);
 }
 
             // c. find merged eigenvectors
-HIP_CHECK(hipEventRecord(merge_events[5], stream));
+HIP_CHECK(hipEventRecord(merge_events[6], stream));
             ROCSOLVER_LAUNCH_KERNEL(
                 (stedc_mergeRescale_kernel<STEDC_EXTERNAL_GEMM, S>),
                 dim3(n, blks, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, D + shiftD, strideD, E + shiftE, strideE, V, 0, ldv, strideV,
                 tmpz, tempgemm, splits);        
 
-HIP_CHECK(hipEventRecord(merge_events[6], stream));
+HIP_CHECK(hipEventRecord(merge_events[7], stream));
             ROCSOLVER_LAUNCH_KERNEL(
                 (stedc_mergeVectors_kernel<STEDC_EXTERNAL_GEMM, S>),
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, 
@@ -1719,10 +1796,10 @@ print_device_matrix(std::cout,"temps after vectors",n,n,tempgemm+n*n,n);
                 // STEDC_EXTERNAL_GEMM at run time to switch between internal vector updates and
                 // external gemm based updates.
 
-HIP_CHECK(hipEventRecord(merge_events[7], stream));
+HIP_CHECK(hipEventRecord(merge_events[8], stream));
                 HIP_CHECK(hipMemsetAsync((void*)(tempgemm+n*n), 0, sizeof(S) * n * n, stream));
 
-HIP_CHECK(hipEventRecord(merge_events[8], stream));
+HIP_CHECK(hipEventRecord(merge_events[9], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm1_kernel<S>,
                 dim3(numgrps, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, E + shiftE, strideE, tmpz, tempgemm, splits);
@@ -1732,7 +1809,7 @@ if(print_debug)
 print_device_matrix(std::cout,"temps after prepgem1",n,n,tempgemm+n*n,n);
 }
 
-HIP_CHECK(hipEventRecord(merge_events[9], stream));
+HIP_CHECK(hipEventRecord(merge_events[10], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm_kernel<S>,
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, E + shiftE, strideE, tmpz, tempgemm, splits);
@@ -1743,7 +1820,7 @@ print_device_matrix(std::cout,"temps after prepgem",n,n,tempgemm+n*n,n);
 }
 
 
-HIP_CHECK(hipEventRecord(merge_events[10], stream));
+HIP_CHECK(hipEventRecord(merge_events[11], stream));
                 rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n,
                                &one, V, 0, ldv, strideV, tempgemm, n * n, n, 2 * n * n, &zero,
                                tempgemm, 0, n, 2 * n * n, batch_count, workArr);
@@ -1754,26 +1831,27 @@ print_device_matrix(std::cout,"new vectors",n,n,tempgemm,n);
             }
 
             // d. update level
-HIP_CHECK(hipEventRecord(merge_events[11], stream));
+HIP_CHECK(hipEventRecord(merge_events[12], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<S>),
                                     dim3(groupsn, groupsn, batch_count), dim3(BS2,BS2), 0, stream, 
                                     levs, blks, k, n, D + shiftD, strideD,
                                     V, 0, ldv, strideV, tmpz, tempgemm);
 
-HIP_CHECK(hipEventRecord(merge_events[12], stream));
+HIP_CHECK(hipEventRecord(merge_events[13], stream));
 
             HIP_CHECK(hipStreamSynchronize(stream));
-            float merge_elapsed[12];
+            float merge_elapsed[13];
 
-            for(int i = 0; i < 12; i++)
-                HIP_CHECK(hipEventElapsedTime(&merge_elapsed[i], merge_events[i], merge_events[i+1]));
             for(int i = 0; i < 13; i++)
+                HIP_CHECK(hipEventElapsedTime(&merge_elapsed[i], merge_events[i], merge_events[i+1]));
+            for(int i = 0; i < 14; i++)
                 HIP_CHECK(hipEventDestroy(merge_events[i]));
 
 if(print_times)
 {
             printf("\tmergeSort          : %f\n"
                    "\tmergeDeflate       : %f\n"
+                   "\tmergePrepare       : %f\n"
                    "\tmergeRotate        : %f\n"
                    "\tmergeValues        : %f\n"
                    "\tmergeReinsert      : %f\n"
@@ -1786,7 +1864,7 @@ if(print_times)
                    "\tmergeUpdate        : %f\n\n",
                 merge_elapsed[0], merge_elapsed[1], merge_elapsed[2], merge_elapsed[3], merge_elapsed[4], 
                 merge_elapsed[5], merge_elapsed[6], merge_elapsed[7], merge_elapsed[8], merge_elapsed[9],
-                merge_elapsed[10], merge_elapsed[11]);
+                merge_elapsed[10], merge_elapsed[11], merge_elapsed[12]);
             fflush(stdout);
 }
 
