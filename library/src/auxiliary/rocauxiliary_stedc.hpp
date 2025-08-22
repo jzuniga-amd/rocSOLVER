@@ -1829,6 +1829,10 @@ HIP_CHECK(hipEventRecord(merge_events[11], stream));
                 }
                 else
                 {
+
+                    HIP_CHECK(hipMemsetAsync((void*)tempgemm, 0, n*n*sizeof(S), stream));
+                    // HIP_CHECK(hipMemset((void*)tempgemm, 0, n*n*sizeof(S)));
+
                     rocblas_int lvl = levs - k - 1;
                     rocblas_int nb = 1 << lvl;
                     std::vector<rocblas_int> ns(nb);
