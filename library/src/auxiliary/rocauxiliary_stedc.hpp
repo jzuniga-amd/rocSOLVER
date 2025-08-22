@@ -1437,10 +1437,9 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
         else
             *size_tempvect = 0;
         *size_tempgemm = sizeof(S) * 2 * (n * n) * batch_count;
-        if(BATCHED && !COMPLEX)
-            *size_workArr = sizeof(S*) * batch_count;
-        else
-            *size_workArr = 0;
+
+        // blocks for batched GEMM are at least 8 x 8
+        *size_workArr = (n / 8) * sizeof(S*) * 3;
 
         // size for split blocks and sub-blocks positions
         *size_splits_map = sizeof(rocblas_int) * (5 * n + blks) * batch_count;
@@ -1821,9 +1820,67 @@ print_device_matrix(std::cout,"temps after prepgem",n,n,tempgemm+n*n,n);
 
 
 HIP_CHECK(hipEventRecord(merge_events[11], stream));
-                rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n,
-                               &one, V, 0, ldv, strideV, tempgemm, n * n, n, 2 * n * n, &zero,
-                               tempgemm, 0, n, 2 * n * n, batch_count, workArr);
+
+                if(n <= 1024 || batch_count > 1)
+                {
+                    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n,
+                                   &one, V, 0, ldv, strideV, tempgemm, n * n, n, 2 * n * n, &zero,
+                                   tempgemm, 0, n, 2 * n * n, batch_count, workArr);
+                }
+                else
+                {
+                    rocblas_int lvl = levs - k - 1;
+                    rocblas_int nb = 1 << lvl;
+                    std::vector<rocblas_int> ns(nb);
+                    ns[0] = n;
+                    for(int i = 0; i < lvl; ++i)
+                    {
+                        for(int j = (1 << i); j > 0; --j)
+                        {
+                            auto t = ns[j - 1];
+                            auto t2 = t / 2;
+                            ns[j * 2 - 1] = (2 * t2 < t) ? t2 + 1 : t2;
+                            ns[j * 2 - 2] = t2;
+                        }
+                    }
+                    if(std::all_of(ns.begin(), ns.end(), [&](rocblas_int v) { return v == ns[0]; }))
+                    {
+                        rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none,
+                                       ns[0], ns[0], ns[0], &one, V, 0, ldv, ns[0] * ldv + ns[0],
+                                       tempgemm, n * n, n, ns[0] * n + ns[0], &zero, tempgemm, 0, n,
+                                       ns[0] * n + ns[0], nb, workArr);
+                    }
+                    else
+                    {
+                        // there can only be 2 block sizes: ns[0] and ns[0]+1
+                        std::array<std::vector<rocblas_int>, 2> uniform_batch;
+                        uniform_batch[0].reserve(nb);
+                        uniform_batch[1].reserve(nb);
+                        for(rocblas_int i = 0, ps = 0; i < nb; ps += ns[i++])
+                            uniform_batch[ns[i] != ns[0]].push_back(ps);
+                        for(rocblas_int i = 0, nsb = ns[0]; i < 2; ++i, ++nsb)
+                        {
+                            auto& b = uniform_batch[i];
+                            auto nbb = b.size();
+                            std::vector<S*> hABC(nbb * 3);
+                            for(size_t j = 0; j < nbb; ++j)
+                            {
+                                auto ps = b[j];
+                                hABC[j] = V + ps * ldv + ps;
+                                hABC[j + nbb] = tempgemm + n * n + ps * n + ps;
+                                hABC[j + 2 * nbb] = tempgemm + ps * n + ps;
+                            }
+                            HIP_CHECK(hipMemcpy(workArr, hABC.data(), 3 * nbb * sizeof(S*),
+                                                hipMemcpyHostToDevice));
+                            rocsolver_gemm<S, rocblas_int, S* const*, S* const*, S* const*>(
+                                handle, rocblas_operation_none, rocblas_operation_none, nsb, nsb,
+                                nsb, &one, workArr, 0, ldv, 0, workArr + nbb, 0, n, 0, &zero,
+                                workArr + 2 * nbb, 0, n, 0, nbb, nullptr);
+                        }
+                    }
+                }
+
+
 if(print_debug)
 {
 print_device_matrix(std::cout,"new vectors",n,n,tempgemm,n);
