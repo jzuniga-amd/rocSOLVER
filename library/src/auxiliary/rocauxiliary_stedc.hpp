@@ -732,7 +732,8 @@ stedc_mergeValues_kernel(const rocblas_int levs,
                        rocblas_int* splitsA,
                        const S eps,
                        const S ssfmin,
-                       const S ssfmax)
+                       const S ssfmax,
+                       bool use_optimized_slaed4)
 {
     // threads and groups indices
     // batch instance id
@@ -787,19 +788,22 @@ stedc_mergeValues_kernel(const rocblas_int levs,
         rocblas_int tmp = nbx * dm2;
         rocblas_int pin = ps[tmp];
         rocblas_int pmid = ps[tmp + dm];
-        tmp += dm2;
-        rocblas_int pout = tmp < blks ? ps[tmp] : n;
+        // tmp += dm2;
+        // rocblas_int pout = tmp < blks ? ps[tmp] : n;
         S p = 2 * E[pmid - 1];
         rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block
 
         // 1. solve secular equation for every non-deflated value
         // ------------------------------------------------------------------
         rocblas_int linfo;
-        
+
         if(idd[tx] < 0)
         {
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            linfo = slaed4(nr, tx - pin, temps + tx * n, z + pin, std::abs(p), evs[tx]);
+            if(use_optimized_slaed4)
+                linfo = slaed4_optimized(nr, tx - pin, temps + pin * n, z + pin, std::abs(p), evs[tx]);
+            else
+                linfo = slaed4(nr, tx - pin, temps + tx * n, z + pin, std::abs(p), evs[tx]);
 #else
             if(tx - pin == nr - 1)
                 linfo = seq_solve_ext(nr, temps + tx * n, z + pin, std::abs(p), evs[tx], eps,
@@ -808,12 +812,101 @@ stedc_mergeValues_kernel(const rocblas_int levs,
                 linfo = seq_solve(nr, temps + tx * n, z + pin, std::abs(p), evs[tx], eps,
                                   ssfmin, ssfmax);
 #endif
-            if(p < 0)
-                evs[tx] *= -1; 
+            if(!use_optimized_slaed4 && p < 0)
+                evs[tx] *= -1;
         }
     }
 }
 
+template <typename S>
+ROCSOLVER_KERNEL void
+stedc_mergeTemps_kernel(const rocblas_int levs,
+                       const rocblas_int blks,
+                       const rocblas_int k,
+                       const rocblas_int n,
+                       S* EE,
+                       const rocblas_stride strideE,
+                       S* tmpzA,
+                       S* vecsA,
+                       rocblas_int* splitsA)
+{
+    // threads and groups indices
+    // batch instance id
+    rocblas_int bid = hipBlockIdx_y;
+    // thread-group id
+    rocblas_int gid = hipBlockIdx_x;
+    // number of thread-groups
+    rocblas_int nofg = hipGridDim_x;
+    // thread-group dimension
+    rocblas_int dim = hipBlockDim_x;
+    // total number of threads
+    rocblas_int totdim = nofg * dim;
+    // thread id
+    rocblas_int tid = gid * dim + hipThreadIdx_x;
+
+    // select batch instance to work with
+    S* E = EE + bid * strideE;
+
+    // temporary arrays in global memory
+    rocblas_int* splits = splitsA + bid * (5 * n + blks);
+    // the sub-blocks sizes
+    rocblas_int* ns = splits + n;
+    // the sub-blocks initial positions
+    rocblas_int* ps = ns + n;
+    // if idd[i] = 0, the value in position i has been deflated
+    rocblas_int* idd = ps + n;
+    // container of permutations when solving the secular eqns
+    rocblas_int* pers = idd + n;
+    rocblas_int* nrs = pers + n;
+    // the rank-1 modification vectors in the merges
+    S* z = tmpzA + bid * (3 * n);
+    // roots of secular equations
+    S* evs = z + 2*n;
+    // updated eigenvectors after merges
+    S* vecs = vecsA + bid * 2 * (n * n);
+    // temp values during the merges
+    S* temps = vecs + (n * n);
+
+    for(rocblas_int tx = tid; tx < n; tx += totdim)
+    {
+        rocblas_int dm = 1 << k;
+        rocblas_int dm2 = dm << 1;
+
+        // item 'i' belongs to sub-block 'bx' and thus participates
+        // in the merge to create the new sub-block 'nbx'
+        rocblas_int bx = bisearch(tx, ps, blks, false, false) - 1;
+        rocblas_int nbx = bx / dm2;
+
+        // the new sub-block starts at 'pin', the middle point is 'pmid'.
+        // Element 'p' is found at middle point
+        rocblas_int tmp = nbx * dm2;
+        rocblas_int pin = ps[tmp];
+        rocblas_int pmid = ps[tmp + dm];
+        S p = 2 * E[pmid - 1];
+        rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block
+
+        S dlam, lam0;
+        if(idd[tx] < 0)
+        {
+            dlam = evs[tx];
+            lam0 = dlam > 0 ? temps[tx - pin + tx  * n] : temps[tx - pin + 1 + tx * n];
+        }
+        __syncthreads();
+        if(idd[tx] < 0)
+        {
+            for(rocblas_int ty = hipThreadIdx_y; ty < nr; ty += hipBlockDim_y)
+            {
+                temps[ty + tx * n] = (temps[ty + tx * n] - lam0) - dlam;
+            }
+            if(hipThreadIdx_y == 0)
+            {
+                evs[tx] = lam0 + dlam;
+                if(p < 0)
+                    evs[tx] *= -1;
+            }
+        }
+    }
+}
 
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEREINSERT_KERNEL combines and sort the new eigenvalues with the deflated values
@@ -1559,7 +1652,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
 //ttt = atoi(getenv("TIMES"));
 //bool print_times = (ttt == 1);
 bool print_debug = false;
-bool print_times = true;
+bool print_times = false;
 
 hipEvent_t setup_events[4];
 for(int i = 0; i < 4; i++)
@@ -1744,9 +1837,15 @@ print_device_matrix(std::cout,"V after rotate",n,n,V,ldv);
 
             // b. solve secular eq to find merged eigenvalues
 HIP_CHECK(hipEventRecord(merge_events[4], stream));
+            static bool use_optimized_slaed4 = std::getenv("ROCSOLVER_USE_OPTIMIZED_SLAED4");
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, E + shiftE, strideE,
-                                    tmpz, tempgemm, splits, eps, ssfmin, ssfmax);
+                                    tmpz, tempgemm, splits, eps, ssfmin, ssfmax, use_optimized_slaed4);
+            if(use_optimized_slaed4)
+                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeTemps_kernel<S>), dim3(groupsn, batch_count),
+                                        dim3(BS2,BS2), 0, stream, levs, blks, k, n, E + shiftE, strideE,
+                                        tmpz, tempgemm, splits);
+
 
 HIP_CHECK(hipEventRecord(merge_events[5], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeReinsert_kernel<S>), dim3(numgrps, batch_count),
