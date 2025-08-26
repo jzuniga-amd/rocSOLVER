@@ -238,6 +238,7 @@ stedc_mergeSort_kernel(const rocblas_int levs,
     rocblas_int* idd = ps + n;
     // container of permutations when solving the secular eqns
     rocblas_int* pers = idd + n;
+    rocblas_int* rotate_map = splits + 6*n + blks;
     // updated eigenvectors after merges
     S* vecs = vecsA + bid * 2 * (n * n);
 
@@ -269,9 +270,11 @@ stedc_mergeSort_kernel(const rocblas_int levs,
 
         // get merged ordered array 'ev' and permutation map 'per'
         rocblas_int* per = pers + pin;
+        rocblas_int* rmap = rotate_map + pin;
         S* ev = vecs + n + pin;
         ev[pos] = val;
-        per[pos] = tx;            
+        per[pos] = tx;
+        rmap[pos] = -1;
 
         // get vector Z
         const S inv_sqrt2 = 1 / std::sqrt(2);
@@ -311,7 +314,7 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
+    rocblas_int* splits = splitsA + bid * (7 * n + blks);
     // the sub-blocks sizes
     rocblas_int* ns = splits + n;
     // the sub-blocks initial positions
@@ -321,6 +324,7 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
     // container of permutations when solving the secular eqns
     rocblas_int* pers = idd + n;
     rocblas_int* nrs = pers + n;
+    rocblas_int* rotate_map = splits + 6*n + blks;
     // the rank-1 modification vectors in the merges
     S* z = tmpzA + bid * (3 * n);
     // roots of secular equations
@@ -482,6 +486,7 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
 
                             // save the rotation encoded for mergeRotate
                             count++;
+                            rotate_map[oldi + count] = mapt;
                             c[mapt] = cc;
                             s[mapt] = ss;
                         }
@@ -623,7 +628,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int bid = hipBlockIdx_y;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
+    rocblas_int* splits = splitsA + bid * (7 * n + blks);
     // the sub-blocks sizes
     rocblas_int* ns = splits + n;
     // the sub-blocks initial positions
@@ -632,6 +637,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int* idd = ps + n;
     // container of permutations when solving the secular eqns
     rocblas_int* pers = idd + n;
+    rocblas_int* rotate_map = splits + 6*n + blks;
     // the rank-1 modification vectors in the merges
     S* z = tmpzA + bid * (3 * n);
     // roots of secular equations
@@ -672,7 +678,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
             for (int dn = 0; dn < dcnt; dn++) 
             {
-                rocblas_int top = map[dgs + dn + 1];
+                rocblas_int top = rotate_map[dgs + dn + 1];
                 S c = cc[top];
                 S s = ss[top];
                 S* Ctop = C + top * ldc;
@@ -1443,7 +1449,7 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
             *size_workArr = 0;
 
         // size for split blocks and sub-blocks positions
-        *size_splits_map = sizeof(rocblas_int) * (5 * n + blks) * batch_count;
+        *size_splits_map = sizeof(rocblas_int) * (7 * n + blks) * batch_count;
 
         // size for temporary diagonal and rank-1 modif vector
         *size_tmpz = sizeof(S) * (3 * n) * batch_count;
@@ -1559,7 +1565,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
 //ttt = atoi(getenv("TIMES"));
 //bool print_times = (ttt == 1);
 bool print_debug = false;
-bool print_times = true;
+bool print_times = false;
 
 hipEvent_t setup_events[4];
 for(int i = 0; i < 4; i++)
@@ -1707,6 +1713,7 @@ printf("after mergeDeflate:\n");
 printf("---------------------\n");
 print_device_matrix(std::cout,"size of non-deflated",1,blks,splits+5*n,1);
 print_device_matrix(std::cout,"ids after deflation",1,n,splits+3*n,1);
+print_device_matrix(std::cout,"rotate map after deflation",1,n,splits + 6*n + blks,1);
 print_device_matrix(std::cout,"non deflated values",1,n,tmpz+n,1);
 print_device_matrix(std::cout,"deflated values",1,n,tmpz+2*n,1);
 print_device_matrix(std::cout,"dcount of rotations",1,n,splits,1);
