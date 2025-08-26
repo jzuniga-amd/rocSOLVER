@@ -321,7 +321,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
         rocsolver_stedc_template<false, ISBATCHED, T>(
             handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
-            strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
+            strideW, info, batch_count, (S*)work3, work2, (S*)work1, tmpz, splits, (S**)workArr);
 
         // update the eigenvectors (if applicable)
         if(evect == rocblas_evect_original)
@@ -455,7 +455,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
         rocsolver_stedc_template<false, ISBATCHED, T>(
             handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
-            strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
+            strideW, info, batch_count, (S*)work3, work2, (S*)work1, tmpz, splits, (S**)workArr);
 
         // update the eigenvectors (if applicable)
         if(evect == rocblas_evect_original)

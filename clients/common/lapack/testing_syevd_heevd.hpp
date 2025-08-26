@@ -159,32 +159,114 @@ void syevd_heevd_default_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-        rocblas_init<T>(hA, true);
-
-        // scale A to avoid singularities
-        for(rocblas_int b = 0; b < bc; ++b)
+        if(n == 21)
         {
-            for(rocblas_int i = 0; i < n; i++)
+            for(rocblas_int b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = i; j < n; j++)
+                hA[b][0] =   1.92753357034913209;
+                hA[b][1+lda] =   2.07246642965086725;
+                hA[b][2*(1+lda)] =   2.73196618566814386;
+                hA[b][3*(1+lda)] =   2.25416816370981676;
+                hA[b][4*(1+lda)] =   1.01386565062204159;
+                hA[b][5*(1+lda)] =   2.41429924311683131;
+                hA[b][6*(1+lda)] =   2.58570075688316781;
+                hA[b][7*(1+lda)] =  -1.62005915258370292;
+                hA[b][8*(1+lda)] =   1.45742500173831457;
+                hA[b][9*(1+lda)] =   3.16263415084538835;
+                hA[b][10*(1+lda)] =   2.01204993620197836;
+                hA[b][11*(1+lda)] =   2.98795006379802164;
+                hA[b][12*(1+lda)] =   0.30470626361906283;
+                hA[b][13*(1+lda)] =   0.1885087851531192;
+                hA[b][14*(1+lda)] =   1.50678495122781841;
+                hA[b][15*(1+lda)] =   1.77347161157687916;
+                hA[b][16*(1+lda)] =   1.58814777830053266;
+                hA[b][17*(1+lda)] =   1.63838061012258773;
+                hA[b][18*(1+lda)] =  -1.358211775324369;
+                hA[b][19*(1+lda)] =   1.26329060394258286;
+                hA[b][20*(1+lda)] =   0.09492117138178557;
+    
+                hA[b][0+lda] =  -0.25925864734763121;
+                hA[b][1+2*lda] =   1;
+                hA[b][2+3*lda] =  -0.93941738783257778;
+                hA[b][3+4*lda] =  -0.22175899704358948;
+                hA[b][4+5*lda] =  -1;
+                hA[b][5+6*lda] =  -1.49754979225054563;
+                hA[b][6+7*lda] =  -1;
+                hA[b][7+8*lda] =  -0.95113171054750978;
+                hA[b][8+9*lda] =  -0.40645896550279997;
+                hA[b][9+10*lda] =   2;
+                hA[b][10+11*lda] =  -0.15477296741189878;
+                hA[b][11+12*lda] =   1;
+                hA[b][12+13*lda] =   1.4261891709592014;
+                hA[b][13+14*lda] =  -1.256218326676529;
+                hA[b][14+15*lda] =   1;
+                hA[b][15+16*lda] =  -1.06425644211708037;
+                hA[b][16+17*lda] =  -0.57148600477942435;
+                hA[b][17+18*lda] =  -1;
+                hA[b][18+19*lda] =  -1.09381627996557929;
+                hA[b][19+20*lda] =  -0.6610230845429605;
+                
+                hA[b][1] =  -0.25925864734763121;
+                hA[b][2+lda] =   1;
+                hA[b][3+2*lda] =  -0.93941738783257778;
+                hA[b][4+3*lda] =  -0.22175899704358948;
+                hA[b][5+4*lda] =  -1;
+                hA[b][6+5*lda] =  -1.49754979225054563;
+                hA[b][7+6*lda] =  -1;
+                hA[b][8+7*lda] =  -0.95113171054750978;
+                hA[b][9+8*lda] =  -0.40645896550279997;
+                hA[b][10+9*lda] =   2;
+                hA[b][11+10*lda] =  -0.15477296741189878;
+                hA[b][12+11*lda] =   1;
+                hA[b][13+12*lda] =   1.4261891709592014;
+                hA[b][14+13*lda] =  -1.256218326676529;
+                hA[b][15+14*lda] =   1;
+                hA[b][16+15*lda] =  -1.06425644211708037;
+                hA[b][17+16*lda] =  -0.57148600477942435;
+                hA[b][18+17*lda] =  -1;
+                hA[b][19+18*lda] =  -1.09381627996557929;
+                hA[b][20+19*lda] =  -0.6610230845429605;
+                
+                // make copy of original data to test vectors if required
+                if(test && evect == rocblas_evect_original)
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
-                    else
+                    for(rocblas_int i = 0; i < n; i++)
                     {
-                        hA[b][i + j * lda] -= 4;
-                        hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                        for(rocblas_int j = 0; j < n; j++)
+                            A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
                     }
                 }
             }
-
-            // make copy of original data to test vectors if required
-            if(test && evect == rocblas_evect_original)
+        }
+        else
+        {
+            rocblas_init<T>(hA, true);
+    
+            // scale A to avoid singularities
+            for(rocblas_int b = 0; b < bc; ++b)
             {
                 for(rocblas_int i = 0; i < n; i++)
                 {
-                    for(rocblas_int j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                    for(rocblas_int j = i; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
+                        else
+                        {
+                            hA[b][i + j * lda] -= 4;
+                            hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                        }
+                    }
+                }
+        
+                // make copy of original data to test vectors if required
+                if(test && evect == rocblas_evect_original)
+                {
+                    for(rocblas_int i = 0; i < n; i++)
+                    {
+                        for(rocblas_int j = 0; j < n; j++)
+                            A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                    }
                 }
             }
         }
@@ -876,7 +958,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
@@ -916,7 +998,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,

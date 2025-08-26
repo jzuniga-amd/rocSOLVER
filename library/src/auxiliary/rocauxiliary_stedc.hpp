@@ -71,7 +71,7 @@ stedc_divide_kernel(const rocblas_int levs,
                     S* EE,
                     const rocblas_stride strideE,
                     const rocblas_int batch_count,
-                    rocblas_int* splitsA)
+                    rocblas_int* workInt)
 {
     // threads and groups indices
     rocblas_int bid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -79,16 +79,13 @@ stedc_divide_kernel(const rocblas_int levs,
     // for each matrix in the batch
     if(bid < batch_count)
     {
-        // select batch instance to work with
+        // select batch instance to work with 
         S* D = DD + bid * strideD;
         S* E = EE + bid * strideE;
 
         // temporary arrays in global memory
-        rocblas_int* splits = splitsA + bid * (5 * n + blks);
-        // the sub-blocks sizes
-        rocblas_int* ns = splits + n;
-        // the sub-blocks initial positions
-        rocblas_int* ps = ns + n;
+        rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+        rocblas_int* ns = ps + blks;
 
         // find sizes of sub-blocks
         ns[0] = n;
@@ -142,7 +139,7 @@ stedc_solve_kernel(const rocblas_int levs,
                    const rocblas_stride strideC,
                    rocblas_int* iinfo,
                    S* WA,
-                   rocblas_int* splitsA,
+                   rocblas_int* workInt,
                    const S eps,
                    const S ssfmin,
                    const S ssfmax)
@@ -157,29 +154,24 @@ stedc_solve_kernel(const rocblas_int levs,
     rocblas_int tidb_inc = hipBlockDim_x;
 
     // select batch instance to work with
-    S* C;
-    if(CC)
-        C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
+    S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
     S* D = DD + bid * strideD;
     S* E = EE + bid * strideE;
     rocblas_int* info = iinfo + bid;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // workspace for solvers
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
     S* W = WA + bid * (2 * n);
 
     // Solve the blks sub-blocks in parallel (using classic QR iteration).
     if(sid < blks)
     {
-        rocblas_int sbs = ns[sid];  // size of sub-block
-        rocblas_int p2 = ps[sid];   // start position of sub-block
+        rocblas_int tmp = sid + 1;
+        rocblas_int pout = tmp < blks ? ps[tmp] : n;
+        rocblas_int pin = ps[sid];      // start position of sub-block
+        rocblas_int sbs = pout - pin;   // size of sub-block
 
-        run_steqr(tidb, tidb_inc, sbs, D + p2, E + p2, C + p2 + p2 * ldc, ldc, info, W + p2 * 2,
+        run_steqr(tidb, tidb_inc, sbs, D + pin, E + pin, C + pin + pin * ldc, ldc, info, W + pin * 2,
                   30 * sbs, eps, ssfmin, ssfmax, true);
     }
 }
@@ -204,9 +196,8 @@ stedc_mergeSort_kernel(const rocblas_int levs,
                        const rocblas_int shiftC,
                        const rocblas_int ldc,
                        const rocblas_stride strideC,
-                       S* tmpzA,
-                       S* vecsA,
-                       rocblas_int* splitsA)
+                       S* workSvec,
+                       rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -223,23 +214,14 @@ stedc_mergeSort_kernel(const rocblas_int levs,
     rocblas_int tid = gid * dim + hipThreadIdx_x;
 
     // select batch instance to work with
-    S* C;
-    if(CC)
-        C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
+    S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
     S* D = DD + bid * strideD;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* idd1 = ps + 2 * blks;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* ev1 = z1 + 2 * n;
 
     // work with all the values (items) in parallel
     for(rocblas_int tx = tid; tx < n; tx += totdim)
@@ -268,16 +250,15 @@ stedc_mergeSort_kernel(const rocblas_int levs,
         rocblas_int pos = pos1 + pos2;
 
         // get merged ordered array 'ev' and permutation map 'per'
-        rocblas_int* per = pers + pin;
-        S* ev = vecs + n + pin;
+        rocblas_int* idd = idd1 + pin;
+        S* ev = ev1 + pin;
         ev[pos] = val;
-        per[pos] = tx;            
+        idd[pos] = tx;            
 
         // get vector Z
         const S inv_sqrt2 = 1 / std::sqrt(2);
-        S* z = vecs;
         val = tx < pmid ? C[pmid - 1 + tx * ldc] : C[pmid + tx * ldc];
-        z[tx] = val * inv_sqrt2;
+        z1[tx] = val * inv_sqrt2;
     }
 }
 
@@ -296,9 +277,8 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
                           const rocblas_int n,
                           S* EE,
                           const rocblas_stride strideE,
-                          S* tmpzA,
-                          S* vecsA,
-                          rocblas_int* splitsA,
+                          S* workSvec,
+                          rocblas_int* workInt,
                           const S eps)
 {
     // threads and groups indices
@@ -311,29 +291,22 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* evr = z + n;
-    S* evf = z + 2*n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
-
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    rocblas_int* idd1 = nrs + blks;
+    rocblas_int* idd2 = idd1 + n;
+    rocblas_int* dcount = idd2 + n;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* z2 = z1 + n;
+    S* ev1 = z2 + n;
+    S* ev2 = ev1 + n;
+    S* ev3 = ev2 + n;
+    S* c = ev3 + n;
+    S* s = c + n;
+    
     // temporary arrays in shared memory
-    extern __shared__ rocblas_int lsmem[];
     // used to store temp values during the different reductions
+    extern __shared__ rocblas_int lsmem[];
     S* shmaxz = reinterpret_cast<S*>(lsmem);
     S* shmaxd = shmaxz + blks;
 
@@ -342,51 +315,47 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
     // ----------------------------------------------------------
     rocblas_int dm = 1 << k;
     rocblas_int dm2 = dm << 1;
-    // size of sub-block 'tx'
-    rocblas_int bs = ns[tx];
-    // its initial index      
-    rocblas_int bin = ps[tx];
-    // 'bx' indexes block 'tx' in the context of the merge according to the level 'k'
+    
+    // initial index of block 'tx' is 'bin', it's size is 'bs'. It is block 'bx' in the context
+    // of the merge, and it will be merged to create new block 'nbx'      
+    rocblas_int tmp = tx + 1 < blks ? ps[tx + 1] : n;
+    rocblas_int bin = tx < blks ? ps[tx] : 0;
+    rocblas_int bs = tmp - bin;
     rocblas_int bx = tx % dm2; 
-    // block 'tx' will be merge to create the new sub-block 'nbx'
     rocblas_int nbx = tx / dm2;
 
-    // the new sub-block of size 'sz' starts at 'pin', the middle point is 'pmid', and
+    // the new sub-block starts at 'pin', the middle point is 'pmid', and
     // it ends at 'pout'. Element 'p' is found at middle point
-    rocblas_int pin = 0, pmid = 0, pout = 0, sz = 0;
+    rocblas_int pin = 0, pmid = 0, pout = 0;
     S p = 0;
     if(tx < blks)
     {
-        rocblas_int tmp = nbx * dm2;
+        tmp = nbx * dm2;
         pin = ps[tmp];
         pmid = ps[tmp + dm];
         tmp += dm2;
         pout = tmp < blks ? ps[tmp] : n;
         p = 2 * E[pmid - 1];
-        sz = pout - pin;
     }
 
 
     // 2. Find tolerance for deflation
     // ---------------------------------------------------
     // find max values of evs and z in the sub-blocks
-    S* zz = vecs;
-    S* vals = vecs + n;
-    S* ztmp = vecs + 2 * n;
     S valz, vald, maxz = 0, maxd = 0;
     if(tx < blks)
     {
         for(int ii = 0; ii < bs; ++ii)
         {
             rocblas_int i = ii + bin;
-            valz = std::abs(zz[i]);
+            valz = std::abs(z1[i]);
             maxz = (valz > maxz) ? valz : maxz;
         }
         shmaxz[tx] = maxz;
         if(bx == 0)
         {
-            maxd = abs(vals[pin]);
-            vald = abs(vals[pout - 1]);
+            maxd = abs(ev1[pin]);
+            vald = abs(ev1[pout - 1]);
             shmaxd[tx] = (vald > maxd) ? vald : maxd;
         }
     }
@@ -421,55 +390,44 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
     
     if(tx < blks && bx == 0)
     {    
-        // arrays for the sub-block:
-        // 'evrf' has the form [remaining values | deflated values].
-        // 'idrf' contains the corresponding indices, and
-        // 'z' the non-zeroed elements of z.
-        rocblas_int* idrf = idd;   
-
-        // arrays to save the rotations for kernel mergeRotate:
-        rocblas_int* dcount = splits;
-        S* c = vecs + 3 * n;
-        S* s = vecs + 4 * n;
-
         rocblas_int i = pin;
         while(i < pout)
         {
             rocblas_int count = 0;
-            rocblas_int map = pers[i];
-            vald = vals[i];
-            valz = zz[map];
+            rocblas_int map = idd1[i];
+            vald = ev1[i];
+            valz = z1[map];
             
             if(abs(p * valz) <= tol)
             {
                 // deflate 'vald' because of zero component in Z
                 nf++;
-                evf[pout - nf] = vald;
-                idrf[pout - nf] = map;
+                ev3[pout - nf] = vald;
+                idd2[pout - nf] = map;
                 dcount[i] = 0;
                 i++;
             }
             else
             {
                 // otherwise, 'vald' is not deflated and will be part of secular equation
-                evr[pin + nr] = vald;
-                idrf[pin + nr] = -(map + 1);
+                ev2[pin + nr] = vald;
+                idd2[pin + nr] = -(map + 1);
                 rocblas_int oldi = i;
                 
                 // now, analyze the sequence of values close to 'vald', if any,  and deflate them
                 i++;
                 while(i < pout)
                 { 
-                    rocblas_int mapt = pers[i];
-                    S valdt = vals[i];
-                    S valzt = zz[mapt];
+                    rocblas_int mapt = idd1[i];
+                    S valdt = ev1[i];
+                    S valzt = z1[mapt];
 
                     if(abs(vald - valdt) <= tol)
                     {
                         // deflate 'valdt' because is same as 'vald' for the given tolerance
                         nf++;
-                        evf[pout - nf] = valdt; 
-                        idrf[pout - nf] = mapt;
+                        ev3[pout - nf] = valdt; 
+                        idd2[pout - nf] = mapt;
                         dcount[i] = 0;
                         i++;
                         
@@ -489,15 +447,11 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
                     else
                         break;
                 }
-                ztmp[pin + nr] = valz;
+                z2[pin + nr] = valz;
                 dcount[oldi] = count;
                 nr++;
             }
         }
-        
-        // save 'nr' and 'nf'
-        shmaxz[tx] = nr;
-        shmaxd[tx] = nf;
         nrs[tx] = nr;
     }
 }
@@ -515,10 +469,9 @@ stedc_mergePrepare_kernel(const rocblas_int levs,
                           const rocblas_int n,
                           S* EE,
                           const rocblas_stride strideE,
-                          S* tmpzA,
-                          S* vecsA,
-                          rocblas_int* splitsA,
-                          const S eps)
+                          S* workSvec,
+                          S* workStmp,
+                          rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -534,26 +487,12 @@ stedc_mergePrepare_kernel(const rocblas_int levs,
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* evr = z + n;
-    S* evf = z + 2*n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
-    S* ztmp = vecs + 2 * n;
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* z2 = z1 + n;
+    S* ev2 = z2 + 2*n;
+    S* temps = workStmp + bid * (n * n);
 
     rocblas_int dm = 1 << k;
     rocblas_int dm2 = dm << 1;
@@ -579,8 +518,8 @@ stedc_mergePrepare_kernel(const rocblas_int levs,
         if(j < nr)
         {
             S* tmpd = temps + pin * n;
-            S* ev = evr + pin;
-            S* Z = z + pin;
+            S* ev = ev2 + pin;
+            S* Z = z1 + pin;
 
             // if 'p' is negative, the values are copied as negative in reverse order
             // as required by the secular equation solvers
@@ -593,7 +532,7 @@ stedc_mergePrepare_kernel(const rocblas_int levs,
                 int id = start + sig * i;
                 tmpd[i + j * n] = sig * ev[id];
                 if(j == 0)
-                    Z[i] = ztmp[id + pin];
+                    Z[i] = z2[id + pin];
             }
         }
     }
@@ -614,39 +553,23 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                              const rocblas_int shiftC,
                              const rocblas_int ldc,
                              const rocblas_stride strideC,
-                             S* tmpzA,
-                             S* vecsA,
-                             rocblas_int* splitsA)
+                             S* workSvec,
+                             rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
-
-    // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* evs = z + n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
-
+    
+    // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
 
-    rocblas_int* map = pers;         
-    rocblas_int* dcounts = splits; 
-    S* cc = vecs + 3 * n;
-    S* ss = vecs + 4 * n; 
+    // temporary arrays in global memory
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* idd1 = ps + 2 * blks;
+    rocblas_int* dcount = idd1 + 2 * n;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* cc = z1 + 5*n;
+    S* ss = cc + n;
 
     constexpr int regs = 16;
     const int chunk_width = regs * hipBlockDim_x;
@@ -655,10 +578,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     S tval[regs];
 
     rocblas_int dgs = hipBlockIdx_x;
-    rocblas_int dcnt = dcounts[dgs];
+    rocblas_int dcnt = dcount[dgs];
     if (dcnt)
     {
-        rocblas_int base = map[dgs];
+        rocblas_int base = idd1[dgs];
         S* Cbase = C + base * ldc;
 
         for (int chunk = 0; chunk < n_chunks; chunk++) 
@@ -672,7 +595,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
             for (int dn = 0; dn < dcnt; dn++) 
             {
-                rocblas_int top = map[dgs + dn + 1];
+                rocblas_int top = idd1[dgs + dn + 1];
                 S c = cc[top];
                 S s = ss[top];
                 S* Ctop = C + top * ldc;
@@ -727,9 +650,9 @@ stedc_mergeValues_kernel(const rocblas_int levs,
                        const rocblas_int n,
                        S* EE,
                        const rocblas_stride strideE,
-                       S* tmpzA,
-                       S* vecsA,
-                       rocblas_int* splitsA,
+                       S* workSvec,
+                       S* workStmp,
+                       rocblas_int* workInt,
                        const S eps,
                        const S ssfmin,
                        const S ssfmax)
@@ -752,24 +675,13 @@ stedc_mergeValues_kernel(const rocblas_int levs,
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* evs = z + 2*n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    rocblas_int* idd2 = nrs + blks + n;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* ev3 = z1 + 4*n;
+    S* temps = workStmp + bid * (n * n);
+
 
     // work with all the values (items) in parallel
     for(rocblas_int tx = tid; tx < n; tx += totdim)
@@ -796,20 +708,20 @@ stedc_mergeValues_kernel(const rocblas_int levs,
         // ------------------------------------------------------------------
         rocblas_int linfo;
         
-        if(idd[tx] < 0)
+        if(idd2[tx] < 0)
         {
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            linfo = slaed4(nr, tx - pin, temps + tx * n, z + pin, std::abs(p), evs[tx]);
+            linfo = slaed4(nr, tx - pin, temps + tx * n, z1 + pin, std::abs(p), ev3[tx]);
 #else
             if(tx - pin == nr - 1)
-                linfo = seq_solve_ext(nr, temps + tx * n, z + pin, std::abs(p), evs[tx], eps,
+                linfo = seq_solve_ext(nr, temps + tx * n, z1 + pin, std::abs(p), ev3[tx], eps,
                                       ssfmin, ssfmax);
             else
-                linfo = seq_solve(nr, temps + tx * n, z + pin, std::abs(p), evs[tx], eps,
+                linfo = seq_solve(nr, temps + tx * n, z1 + pin, std::abs(p), ev3[tx], eps,
                                   ssfmin, ssfmax);
 #endif
             if(p < 0)
-                evs[tx] *= -1; 
+                ev3[tx] *= -1; 
         }
     }
 }
@@ -831,9 +743,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                               const rocblas_stride strideD,
                               S* EE,
                               const rocblas_stride strideE,
-                              S* tmpzA,
-                              S* vecsA,
-                              rocblas_int* splitsA)
+                              S* workSvec,
+                              rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -854,25 +765,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* ev = z + n;
-    S* evs = z + 2*n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    rocblas_int* idd1 = nrs + blks;
+    rocblas_int* idd2 = idd1 + n;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* ev3 = z1 + 4*n;
 
     rocblas_int dm = 1 << k;
     rocblas_int dm2 = dm << 1;
@@ -897,13 +795,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
         // 1. re-insert deflated values to keep new sub-blocks ordered
         // -----------------------------------------------------------------------
-        rocblas_int* ord = splits;
         rocblas_int nf = pout - pin - nr;   // number of deflated values 
         
         // the position where the item 'j' will end up in the ordered array is 'pos'
-        S val = evs[j];
-        rocblas_int pos1 = (j < nr + pin) ? bisearch(val, evs + nr + pin, nf, true, true)
-                                          : bisearch(val, evs + pin, nr, false, (p < 0));
+        S val = ev3[j];
+        rocblas_int pos1 = (j < nr + pin) ? bisearch(val, ev3 + nr + pin, nf, true, true)
+                                          : bisearch(val, ev3 + pin, nr, false, (p < 0));
         rocblas_int pos2 = (j < nr + pin) ? (p < 0 ? pin + nr - 1 - j : j - pin)   
                                           : pout - j - 1;
         rocblas_int pos = pos1 + pos2 + pin;
@@ -911,11 +808,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         // get merged ordered array 'ev' and permutation map 'ord'
         D[pos] = val;
 
-        rocblas_int ind = idd[j];
+        rocblas_int ind = idd2[j];
         if(ind < 0)
-            ord[pos] = -(j + 1);
+            idd1[pos] = -(j + 1);
         else
-            ord[pos] = ind;
+            idd1[pos] = ind;
     }
 }
 
@@ -931,17 +828,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                               const rocblas_int blks,
                               const rocblas_int k,
                               const rocblas_int n,
-                              S* DD,
-                              const rocblas_stride strideD,
                               S* EE,
                               const rocblas_stride strideE,
-                              S* CC,
-                              const rocblas_int shiftC,
-                              const rocblas_int ldc,
-                              const rocblas_stride strideC,
-                              S* tmpzA,
-                              S* vecsA,
-                              rocblas_int* splitsA)
+                              S* workSvec,
+                              S* workStmp,
+                              S* workSz,
+                              rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -955,30 +847,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int dim = hipBlockDim_x;
 
     // select batch instance to work with
-    S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
     S* E = EE + bid * strideE;
-
+    
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* ev = z + n;
-    S* evs = z + 2*n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    S* z1 = workSvec + bid * (std::max(7,n) * n);
+    S* ev2 = z1 + 3*n;
+    S* temps = workStmp + bid * (n * n);
+    S* zf = workSz + bid * n;
 
     // temporary arrays in shared memory
     // used to store temp values during the different reductions
@@ -999,8 +876,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         S p = 2 * E[pmid - 1];
         rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block
 
-        rocblas_int* id = idd + pin;
-        S* evd = ev + pin;
+        S* evd = ev2 + pin;
         rocblas_int start = (p < 0) ? nr - 1 : 0;
         rocblas_int inc = (p < 0) ? -1 : 1;
 
@@ -1008,7 +884,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         // --------------------------------------------------------------------
         if(i < nr)
         {
-            rocblas_int sgnz = (z[i + pin] < 0) ? -1 : 1;
+            rocblas_int sgnz = (z1[i + pin] < 0) ? -1 : 1;
             S dd = evd[start + inc * i];
             S mul = 1;
 
@@ -1033,7 +909,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
             }
 
             if(tidb == 0)
-                z[i + pin] = sgnz * std::sqrt(mul);
+                zf[i + pin] = sgnz * std::sqrt(mul);
         }
     }
 }
@@ -1051,17 +927,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                               const rocblas_int blks,
                               const rocblas_int k,
                               const rocblas_int n,
-                              S* DD,
-                              const rocblas_stride strideD,
                               S* EE,
                               const rocblas_stride strideE,
-                              S* CC,
-                              const rocblas_int shiftC,
-                              const rocblas_int ldc,
-                              const rocblas_stride strideC,
-                              S* tmpzA,
-                              S* vecsA,
-                              rocblas_int* splitsA)
+                              S* workSvec,
+                              S* workStmp,
+                              S* workSz,
+                              rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -1073,30 +944,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int dim = hipBlockDim_x;
 
     // select batch instance to work with
-    S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* ev = z + n;
-    S* evs = z + 2*n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    rocblas_int* idd2 = nrs + blks + n;
+    S* vecs = workSvec + bid * (std::max(7,n) * n);
+    S* temps = workStmp + bid * (n * n);
+    S* zf = workSz + bid * n;
 
     // temporary arrays in shared memory
     // used to store temp values during the different reductions
@@ -1119,20 +975,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int pout = tmp < blks ? ps[tmp] : n;
     S p = 2 * E[pmid - 1];
     rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block
-
-    rocblas_int* id = idd + pin;
-    S* evd = ev + pin;
     rocblas_int start = (p < 0) ? nr - 1 : 0;
     rocblas_int inc = (p < 0) ? -1 : 1;
 
     // 1. compute vectors of rank-1 perturbed system and their norms
     // --------------------------------------------------------------------
-    if(idd[j] < 0 && j < n)
+    if(idd2[j] < 0 && j < n)
     { 
         S tm, nrm = 0;
         for(int i = tidb; i < nr; i += dim)
         {
-            S tot = z[i + pin] / temps[i + j * n];
+            S tot = zf[i + pin] / temps[i + j * n];
             vecs[i + j * n] = tot;
             nrm += tot * tot;
         }
@@ -1177,11 +1030,8 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm1_kernel(const rocblas_int levs,
                                               const rocblas_int blks,
                                               const rocblas_int k,
                                               const rocblas_int n,
-                                              S* EE,
-                                              const rocblas_stride strideE,
-                                              S* tmpzA,
-                                              S* vecsA,
-                                              rocblas_int* splitsA)
+                                              S* workStmp,
+                                              rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -1190,28 +1040,13 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm1_kernel(const rocblas_int levs,
     rocblas_int tid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* evs = z + n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* idd1 = ps + 2 * blks;
+    S* temps = workStmp + bid * (n * n);
 
     for(int j = tid; j < n; j += dim)
     {
-        rocblas_int i = splits[j];
+        rocblas_int i = idd1[j];
         if(i >= 0)
             temps[i + j * n] = 1;
     }
@@ -1229,9 +1064,9 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
                                               const rocblas_int n,
                                               S* EE,
                                               const rocblas_stride strideE,
-                                              S* tmpzA,
-                                              S* vecsA,
-                                              rocblas_int* splitsA)
+                                              S* workSvec,
+                                              S* workStmp,
+                                              rocblas_int* workInt)
 {
     // threads and groups indices
     // batch instance id
@@ -1245,24 +1080,12 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
     S* E = EE + bid * strideE;
 
     // temporary arrays in global memory
-    rocblas_int* splits = splitsA + bid * (5 * n + blks);
-    // the sub-blocks sizes
-    rocblas_int* ns = splits + n;
-    // the sub-blocks initial positions
-    rocblas_int* ps = ns + n;
-    // if idd[i] = 0, the value in position i has been deflated
-    rocblas_int* idd = ps + n;
-    // container of permutations when solving the secular eqns
-    rocblas_int* pers = idd + n;
-    rocblas_int* nrs = pers + n;
-    // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (3 * n);
-    // roots of secular equations
-    S* evs = z + n;
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
-    // temp values during the merges
-    S* temps = vecs + (n * n);
+    rocblas_int* ps = workInt + bid * (3 * n + 2 * blks);
+    rocblas_int* nrs = ps + blks;
+    rocblas_int* idd1 = nrs + blks;
+    rocblas_int* idd2 = idd1 + n;
+    S* vecs = workSvec + bid * (std::max(7,n) * n);
+    S* temps = workStmp + bid * (n * n);
 
     rocblas_int dm = 1 << k;
     rocblas_int dm2 = dm << 1;
@@ -1287,7 +1110,7 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
 
     // 1. put vectors in padded matrix 'temps' to use external gemm for the update
     // -----------------------------------------------------------------------
-    rocblas_int ind = splits[j];
+    rocblas_int ind = idd1[j];
     
     if(ind < 0)
     {
@@ -1298,7 +1121,7 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
             S val = vecs[i + jv * n];
 
             // write in final position in 'temps' (this permutates rows)
-            rocblas_int it = -(idd[start + inc * i] + 1);
+            rocblas_int it = -(idd2[start + inc * i] + 1);
             temps[it + j * n] = val;
         }
     }
@@ -1316,14 +1139,11 @@ ROCSOLVER_KERNEL void
                              const rocblas_int blks,
                              const rocblas_int k,
                              const rocblas_int n,
-                             S* DD,
-                             const rocblas_stride strideD,
                              S* CC,
                              const rocblas_int shiftC,
                              const rocblas_int ldc,
                              const rocblas_stride strideC,
-                             S* tmpzA,
-                             S* vecsA)
+                             S* workSvec)
 {
     // threads and groups indices
     // batch instance id
@@ -1337,13 +1157,9 @@ ROCSOLVER_KERNEL void
 
     // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
 
     // temporary arrays in global memory
-    // updated eigenvalues after merge
-    S* evs = tmpzA + bid * (3 * n);
-    // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
+    S* vecs = workSvec + bid * (n * n);
 
     for(int j = cid; j < n; j += dimc)
     {
@@ -1378,11 +1194,11 @@ template <bool BATCHED, typename T, typename S>
 void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
                                    const rocblas_int n,
                                    const rocblas_int batch_count,
-                                   size_t* size_work_stack,
                                    size_t* size_tempvect,
-                                   size_t* size_tempgemm,
-                                   size_t* size_tmpz,
-                                   size_t* size_splits_map,
+                                   size_t* size_workSvec,
+                                   size_t* size_workStmp,
+                                   size_t* size_workSz,
+                                   size_t* size_workInt,
                                    size_t* size_workArr)
 {
     constexpr bool COMPLEX = rocblas_is_complex<T>;
@@ -1390,12 +1206,12 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
     // if quick return no workspace needed
     if(n <= 1 || !batch_count)
     {
-        *size_work_stack = 0;
         *size_tempvect = 0;
-        *size_tempgemm = 0;
+        *size_workSvec = 0;
+        *size_workStmp = 0;
         *size_workArr = 0;
-        *size_splits_map = 0;
-        *size_tmpz = 0;
+        *size_workInt = 0;
+        *size_workSz = 0;
         return;
     }
 
@@ -1403,50 +1219,55 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
     if(evect == rocblas_evect_none)
     {
         *size_tempvect = 0;
-        *size_tempgemm = 0;
+        *size_workStmp = 0;
         *size_workArr = 0;
-        *size_splits_map = 0;
-        *size_tmpz = 0;
-        rocsolver_sterf_getMemorySize<S>(n, batch_count, size_work_stack);
+        *size_workInt = 0;
+        *size_workSz = 0;
+        rocsolver_sterf_getMemorySize<S>(n, batch_count, size_workSvec);
     }
 
     // if size is too small with classic solver
     else if(n < STEDC_MIN_DC_SIZE)
     {
         *size_tempvect = 0;
-        *size_tempgemm = 0;
+        *size_workStmp = 0;
         *size_workArr = 0;
-        *size_splits_map = 0;
-        *size_tmpz = 0;
-        rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, size_work_stack);
+        *size_workInt = 0;
+        *size_workSz = 0;
+        rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, size_workSvec);
     }
 
     // otherwise use divide and conquer algorithm:
     else
     {
+        if(BATCHED && !COMPLEX)
+            *size_workArr = sizeof(S*) * batch_count;
+        else
+            *size_workArr = 0;
+        
         // find number of sub-blocks 
         rocblas_int levs = stedc_num_levels(n);
         rocblas_int blks = 1 << levs;
 
         // requirements for solver of small independent blocks
-        rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, size_work_stack);
+        size_t vec1;
+        rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, &vec1);
 
-        // extra requirements for original eigenvectors of small independent blocks
+        // extra requirements for original eigenvectors when needed
         if(evect != rocblas_evect_tridiagonal)
             *size_tempvect = sizeof(S) * (n * n) * batch_count;
         else
             *size_tempvect = 0;
-        *size_tempgemm = sizeof(S) * 2 * (n * n) * batch_count;
-        if(BATCHED && !COMPLEX)
-            *size_workArr = sizeof(S*) * batch_count;
-        else
-            *size_workArr = 0;
 
-        // size for split blocks and sub-blocks positions
-        *size_splits_map = sizeof(rocblas_int) * (5 * n + blks) * batch_count;
+        // extra requirements for divde and conquer process
+        size_t vec2 =sizeof(S) * (std::max(7,n) * n) * batch_count;
+        *size_workSvec = std::max(vec1, vec2);
 
-        // size for temporary diagonal and rank-1 modif vector
-        *size_tmpz = sizeof(S) * (3 * n) * batch_count;
+        *size_workStmp = sizeof(S) * (n * n) * batch_count;
+
+        *size_workInt = sizeof(rocblas_int) * (3 * n + 2 * blks) * batch_count;
+
+        *size_workSz = sizeof(S) * (n) * batch_count;
     }
 }
 
@@ -1504,11 +1325,11 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                         const rocblas_stride strideC,
                                         rocblas_int* info,
                                         const rocblas_int batch_count,
-                                        void* work_stack,
                                         S* tempvect,
-                                        S* tempgemm,
-                                        S* tmpz,
-                                        rocblas_int* splits,
+                                        void* workSvec,
+                                        S* workStmp,
+                                        S* workSz,
+                                        rocblas_int* workInt,
                                         S** workArr)
 {
     ROCSOLVER_ENTER("stedc", "evect:", evect, "n:", n, "shiftD:", shiftD, "shiftE:", shiftE,
@@ -1517,8 +1338,6 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
     // quick return
     if(batch_count == 0)
         return rocblas_status_success;
-
-    auto const splits_map = splits;
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -1541,25 +1360,27 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
     if(evect == rocblas_evect_none)
     {
         rocsolver_sterf_template<S>(handle, n, D, shiftD, strideD, E, shiftE, strideE, info,
-                                    batch_count, static_cast<rocblas_int*>(work_stack));
+                                    batch_count, static_cast<rocblas_int*>(workSvec));
     }
 
     // if size is too small with classic solver, use steqr
     else if(n < STEDC_MIN_DC_SIZE)
     {
         rocsolver_steqr_template<T>(handle, evect, n, D, shiftD, strideD, E, shiftE, strideE, C,
-                                    shiftC, ldc, strideC, info, batch_count, work_stack);
+                                    shiftC, ldc, strideC, info, batch_count, workSvec);
     }
 
     // otherwise use divide and conquer algorithm:
     else
     {
+        S* workSvecs = (S*)workSvec;
+
 //int ttt = atoi(getenv("DEBUG"));
 //bool print_debug = (ttt == 1);
 //ttt = atoi(getenv("TIMES"));
 //bool print_times = (ttt == 1);
 bool print_debug = false;
-bool print_times = true;
+bool print_times = false;
 
 hipEvent_t setup_events[4];
 for(int i = 0; i < 4; i++)
@@ -1568,13 +1389,15 @@ for(int i = 0; i < 4; i++)
 if(print_debug)
 {
 printf("\n");
-print_device_matrix(std::cout,"D in",1,n,D,1);
-print_device_matrix(std::cout,"E in",1,n-1,E,1);
+print_device_matrix(std::cout,"D in",1,n,D,1,n,0);
+//print_device_matrix(std::cout,"D in",1,n,D,1,n,1);
+print_device_matrix(std::cout,"E in",1,n-1,E,1,n,0);
+//print_device_matrix(std::cout,"E in",1,n-1,E,1,n,1);
 }
 
         // initialize temporary array for vector updates
-        size_t size_tempgemm = sizeof(S) * 2 * n * n * batch_count;
-        HIP_CHECK(hipMemsetAsync((void*)tempgemm, 0, size_tempgemm, stream));
+//        size_t size_tempgemm = sizeof(S) * 2 * n * n * batch_count;
+//        HIP_CHECK(hipMemsetAsync((void*)tempgemm, 0, size_tempgemm, stream));
 
         // everything must be executed with scalars on the host
         rocblas_pointer_mode old_mode;
@@ -1619,7 +1442,7 @@ HIP_CHECK(hipEventRecord(setup_events[0], stream));
 HIP_CHECK(hipEventRecord(setup_events[1], stream));
         ROCSOLVER_LAUNCH_KERNEL((stedc_divide_kernel<S>),
                                 dim3(groups), dim3(STEDC_BDIM), 0, stream, levs, blks, n, D + shiftD,
-                                strideD, E + shiftE, strideE, batch_count, splits);
+                                strideD, E + shiftE, strideE, batch_count, workInt);
 
         // 2. solve phase
         //-----------------------------
@@ -1627,7 +1450,7 @@ HIP_CHECK(hipEventRecord(setup_events[2], stream));
         ROCSOLVER_LAUNCH_KERNEL((stedc_solve_kernel<S>),
                                 dim3(blks, batch_count), dim3(WAVEFRONT), 0, stream, levs, blks, 
                                 n, D + shiftD, strideD, E + shiftE, strideE, 
-                                V, 0, ldv, strideV, info, (S*)work_stack, splits, 
+                                V, 0, ldv, strideV, info, workSvecs, workInt, 
                                 eps, ssfmin, ssfmax);
 
 HIP_CHECK(hipEventRecord(setup_events[3], stream));
@@ -1650,11 +1473,10 @@ printf("\n\tinit_ident         : %f\n"
 
 if(print_debug)
 {
-print_device_matrix(std::cout,"ns",1,n,splits+n,1);
-print_device_matrix(std::cout,"ps",1,n,splits+2*n,1);
-//print_device_matrix(std::cout,"D at leaves",1,n,D,1);
-//print_device_matrix(std::cout,"E at leaves",1,n-1,E,1);
-//print_device_matrix(std::cout,"V at leaves",n,n,V,ldv);
+print_device_matrix(std::cout,"ps",1,blks,workInt,1);
+print_device_matrix(std::cout,"D at leaves",1,n,D,1);
+print_device_matrix(std::cout,"E at leaves",1,n-1,E,1);
+print_device_matrix(std::cout,"V at leaves",n,n,V,ldv);
 }
 
         // 3. merge phase
@@ -1681,51 +1503,55 @@ printf("------------------------------------------\n\n");
 }
 if(print_debug)
 {
-print_device_matrix(std::cout,"values to be merge-sorted",1,n,D,1);
+print_device_matrix(std::cout,"values to be merge-sorted",1,n,D,1,n,0);
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
 }
 
 HIP_CHECK(hipEventRecord(merge_events[0], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeSort_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, D + shiftD, strideD,
-                                    V, 0, ldv, strideV, tmpz, tempgemm, splits);
+                                    V, 0, ldv, strideV, workSvecs, workInt);
 if(print_debug)
 {
 printf("after mergeSort:\n");
 printf("---------------------\n");
-print_device_matrix(std::cout,"ids of the sort",1,n,splits+4*n,1);
-print_device_matrix(std::cout,"z after sort",1,n,tempgemm,1);
-print_device_matrix(std::cout,"values after sort",1,n,tempgemm+n,1);
+print_device_matrix(std::cout,"ids of the sort",1,n,workInt+2*blks,1);
+print_device_matrix(std::cout,"z after sort",1,n,workSvecs,1);
+print_device_matrix(std::cout,"values after sort",1,n,workSvecs+2*n,1);
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
 }
             
 HIP_CHECK(hipEventRecord(merge_events[1], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeDeflate_kernel<S>), dim3(1, batch_count),
                                     dim3(numthds), lmemsize, stream, levs, blks, k, n, E + shiftE, strideE,
-                                    tmpz, tempgemm, splits, eps);
+                                    workSvecs, workInt, eps);
 if(print_debug)
 {
 printf("after mergeDeflate:\n");
 printf("---------------------\n");
-print_device_matrix(std::cout,"size of non-deflated",1,blks,splits+5*n,1);
-print_device_matrix(std::cout,"ids after deflation",1,n,splits+3*n,1);
-print_device_matrix(std::cout,"non deflated values",1,n,tmpz+n,1);
-print_device_matrix(std::cout,"deflated values",1,n,tmpz+2*n,1);
-print_device_matrix(std::cout,"dcount of rotations",1,n,splits,1);
-print_device_matrix(std::cout,"vecs after deflate",n,n,tempgemm,n);
-print_device_matrix(std::cout,"temps after deflate",n,n,tempgemm+n*n,n);
+print_device_matrix(std::cout,"size of non-deflated",1,blks,workInt+blks,1);
+print_device_matrix(std::cout,"ids after deflation",1,n,workInt+2*blks+n,1);
+print_device_matrix(std::cout,"non deflated values",1,n,workSvecs+3*n,1);
+print_device_matrix(std::cout,"deflated values",1,n,workSvecs+4*n,1);
+print_device_matrix(std::cout,"deflated z",1,n,workSvecs+n,1);
+print_device_matrix(std::cout,"dcount of rotations",1,n,workInt+2*blks+2*n,1);
+print_device_matrix(std::cout,"rotations c",1,n,workSvecs+5*n,1);
+print_device_matrix(std::cout,"rotations s",1,n,workSvecs+6*n,1);
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
 }
 
 HIP_CHECK(hipEventRecord(merge_events[2], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergePrepare_kernel<S>), dim3(groupsn, groupsn, batch_count), 
                                     dim3(BS2,BS2), 0, stream, levs, blks, k, n, E + shiftE, strideE,
-                                    tmpz, tempgemm, splits, eps);
+                                    workSvecs, workStmp, workInt);
 
 if(print_debug)
 {
 printf("after mergePrepare:\n");
 printf("---------------------\n");
-print_device_matrix(std::cout,"vecs after prepare",n,n,tempgemm,n);
-print_device_matrix(std::cout,"temps after prepare",n,n,tempgemm+n*n,n);
-print_device_matrix(std::cout,"Z for secular eqns",1,n,tmpz,1);
+print_device_matrix(std::cout,"temps after prepare",n,n,workStmp,n);
+print_device_matrix(std::cout,"Z for secular eqns",1,n,workSvecs,1);
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
 }
 
 
@@ -1734,35 +1560,36 @@ HIP_CHECK(hipEventRecord(merge_events[3], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeRotate_kernel<S>), dim3(n, batch_count),
                                     dim3(STEDC_BDIM),
                                     0, stream, levs, blks, k, n,
-                                    V, 0, ldv, strideV, tmpz, tempgemm, splits);
+                                    V, 0, ldv, strideV, workSvecs, workInt);
 if(print_debug)
 {
 printf("after mergeRotate:\n");
 printf("---------------------\n");
 print_device_matrix(std::cout,"V after rotate",n,n,V,ldv);            
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
 }
 
             // b. solve secular eq to find merged eigenvalues
 HIP_CHECK(hipEventRecord(merge_events[4], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, E + shiftE, strideE,
-                                    tmpz, tempgemm, splits, eps, ssfmin, ssfmax);
+                                    workSvecs, workStmp, workInt, eps, ssfmin, ssfmax);
 
 HIP_CHECK(hipEventRecord(merge_events[5], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeReinsert_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, D + shiftD, strideD, E + shiftE, strideE,
-                                    tmpz, tempgemm, splits);
+                                    workSvecs, workInt);
 
 if(print_debug)
 {
 printf("after mergeValues:\n");
 printf("---------------------\n");
-print_device_matrix(std::cout,"orig values to secular eqns",1,n,tmpz+n,1);
-print_device_matrix(std::cout,"new values from secular eqns",1,n,tmpz+2*n,1);
+print_device_matrix(std::cout,"orig values to secular eqns",1,n,workSvecs+3*n,1);
+print_device_matrix(std::cout,"new values from secular eqns",1,n,workSvecs+4*n,1);
 print_device_matrix(std::cout,"values with deflated re-indserted in order",1,n,D,1);
-print_device_matrix(std::cout,"final order",1,n,splits,1);
-print_device_matrix(std::cout,"vecs after values",n,n,tempgemm,n);
-print_device_matrix(std::cout,"temps after values",n,n,tempgemm+n*n,n);
+print_device_matrix(std::cout,"final order",1,n,workInt+2*blks,1);
+print_device_matrix(std::cout,"temps after values",n,n,workStmp,n);
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
 }
 
             // c. find merged eigenvectors
@@ -1770,22 +1597,28 @@ HIP_CHECK(hipEventRecord(merge_events[6], stream));
             ROCSOLVER_LAUNCH_KERNEL(
                 (stedc_mergeRescale_kernel<STEDC_EXTERNAL_GEMM, S>),
                 dim3(n, blks, batch_count), dim3(STEDC_BDIM), 0, stream,
-                levs, blks, k, n, D + shiftD, strideD, E + shiftE, strideE, V, 0, ldv, strideV,
-                tmpz, tempgemm, splits);        
+                levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workSz, workInt);        
+
+if(print_debug)
+{
+printf("after mergeRescale:\n");
+printf("---------------------\n");
+print_device_matrix(std::cout,"Z re-scaled",1,n,workSz,1);
+//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
+}
 
 HIP_CHECK(hipEventRecord(merge_events[7], stream));
             ROCSOLVER_LAUNCH_KERNEL(
                 (stedc_mergeVectors_kernel<STEDC_EXTERNAL_GEMM, S>),
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, 
-                levs, blks, k, n, D + shiftD, strideD, E + shiftE, strideE, V, 0, ldv, strideV, 
-                tmpz, tempgemm, splits);
+                levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workSz, workInt);
 
 if(print_debug)
 {
 printf("after mergeVectors:\n");
 printf("---------------------\n");
-print_device_matrix(std::cout,"vecs after vectors",n,n,tempgemm,n);
-print_device_matrix(std::cout,"temps after vectors",n,n,tempgemm+n*n,n);
+print_device_matrix(std::cout,"vecs after vectors",n,n,workSvecs,n);
+print_device_matrix(std::cout,"temps after vectors",n,n,workStmp,n);
 }
 
             if(STEDC_EXTERNAL_GEMM)
@@ -1797,36 +1630,36 @@ print_device_matrix(std::cout,"temps after vectors",n,n,tempgemm+n*n,n);
                 // external gemm based updates.
 
 HIP_CHECK(hipEventRecord(merge_events[8], stream));
-                HIP_CHECK(hipMemsetAsync((void*)(tempgemm+n*n), 0, sizeof(S) * n * n, stream));
+                HIP_CHECK(hipMemsetAsync((void*)(workStmp), 0, sizeof(S) * (n * n) * batch_count, stream));
 
 HIP_CHECK(hipEventRecord(merge_events[9], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm1_kernel<S>,
                 dim3(numgrps, batch_count), dim3(STEDC_BDIM), 0, stream,
-                levs, blks, k, n, E + shiftE, strideE, tmpz, tempgemm, splits);
+                levs, blks, k, n, workStmp, workInt);
 
 if(print_debug)
 {
-print_device_matrix(std::cout,"temps after prepgem1",n,n,tempgemm+n*n,n);
+print_device_matrix(std::cout,"temps after prepgem1",n,n,workStmp,n);
 }
 
 HIP_CHECK(hipEventRecord(merge_events[10], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm_kernel<S>,
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
-                levs, blks, k, n, E + shiftE, strideE, tmpz, tempgemm, splits);
+                levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workInt);
 
 if(print_debug)
 {
-print_device_matrix(std::cout,"temps after prepgem",n,n,tempgemm+n*n,n);
+print_device_matrix(std::cout,"temps after prepgem",n,n,workStmp,n);
 }
 
 
 HIP_CHECK(hipEventRecord(merge_events[11], stream));
                 rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n,
-                               &one, V, 0, ldv, strideV, tempgemm, n * n, n, 2 * n * n, &zero,
-                               tempgemm, 0, n, 2 * n * n, batch_count, workArr);
+                               &one, V, 0, ldv, strideV, workStmp, 0, n, n * n, &zero,
+                               workSvecs, 0, n, n * n, batch_count, workArr);
 if(print_debug)
 {
-print_device_matrix(std::cout,"new vectors",n,n,tempgemm,n);
+print_device_matrix(std::cout,"new vectors",n,n,workSvecs,n);
 }
             }
 
@@ -1834,8 +1667,7 @@ print_device_matrix(std::cout,"new vectors",n,n,tempgemm,n);
 HIP_CHECK(hipEventRecord(merge_events[12], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<S>),
                                     dim3(groupsn, groupsn, batch_count), dim3(BS2,BS2), 0, stream, 
-                                    levs, blks, k, n, D + shiftD, strideD,
-                                    V, 0, ldv, strideV, tmpz, tempgemm);
+                                    levs, blks, k, n, V, 0, ldv, strideV, workSvecs);
 
 HIP_CHECK(hipEventRecord(merge_events[13], stream));
 
@@ -1870,8 +1702,8 @@ if(print_times)
 
 if(print_debug)
 {
-//print_device_matrix(std::cout,"new D",1,n,D,1);
-//print_device_matrix(std::cout,"new V",n,n,V,ldv);
+print_device_matrix(std::cout,"new D",1,n,D,1);
+print_device_matrix(std::cout,"new V",n,n,V,ldv);
 }
 
         }
@@ -1881,8 +1713,8 @@ if(print_debug)
         if(evect != rocblas_evect_tridiagonal)
         {
             // eigenvectors C <- C*V
-            local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, V, tempgemm,
-                                            tempgemm + strideV, 0, ldv, strideV, batch_count,
+            local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, V, workSvecs,
+                                            workStmp, 0, ldv, strideV, batch_count,
                                             workArr);
         }
         else if constexpr(rocblas_is_complex<T>)
@@ -1890,7 +1722,7 @@ if(print_debug)
             // V is stored in C but is of type S; need to convert to type T
             // tempgemm = V
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<S>, dim3(groupsn, groupsn, batch_count), dim3(BS2, BS2),
-                                    0, stream, copymat_to_buffer, n, n, V, 0, ldv, strideV, tempgemm);
+                                    0, stream, copymat_to_buffer, n, n, V, 0, ldv, strideV, workStmp);
 
             // imag(C) = zeros
             ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(groupsn, groupsn, batch_count),
@@ -1899,7 +1731,7 @@ if(print_debug)
             // real(C) = tempgemm
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, true>), dim3(groupsn, groupsn, batch_count),
                                     dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, n, C, shiftC,
-                                    ldc, strideC, tempgemm);
+                                    ldc, strideC, workStmp);
         }
 
         rocblas_set_pointer_mode(handle, old_mode);
