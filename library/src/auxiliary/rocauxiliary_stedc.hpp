@@ -466,8 +466,8 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEPREPARE_KERNEL prepares the components for the secular equations of every 
     pair of sub-blocks that need to be merged.
-        - Call this kernel with batch_count groups in z, and as many groups as needed in 
-          x and y to cover the n rows and columns **/
+        - Call this kernel with batch_count groups in y, and n groups in x. 
+        - Size of groups is set to STEDC_BDIM **/
 template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 stedc_mergePrepare_kernel(const rocblas_int levs,
@@ -481,17 +481,10 @@ stedc_mergePrepare_kernel(const rocblas_int levs,
                           rocblas_int* workInt)
 {
     // threads and groups indices
-    // batch instance id
-//    rocblas_int bid = hipBlockIdx_z;
-//    rocblas_int dimr = hipGridDim_x * hipBlockDim_x;
-//    rocblas_int dimc = hipGridDim_y * hipBlockDim_y;
-    // row id
-//    rocblas_int rid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    // column/vector id
-//    rocblas_int cid = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
-    
     rocblas_int bid = hipBlockIdx_y;
     rocblas_int jj = hipBlockIdx_x;
+    rocblas_int dimr = hipBlockDim_x;
+    rocblas_int rid = hipThreadIdx_x;
 
     // select batch instance to work with
     S* E = EE + bid * strideE;
@@ -508,53 +501,50 @@ stedc_mergePrepare_kernel(const rocblas_int levs,
     rocblas_int dm = 1 << k;
     rocblas_int dm2 = dm << 1;
 
-//    for(int jj = cid; jj < n; jj += dimc)
-//    {
-        // column 'jj' belongs to sub-block 'bx' and thus forms part of 
-        // the new sub-block 'nbx'
-        rocblas_int bx = bp[jj];
-        rocblas_int nbx = bx / dm2;
-        
-        // the new sub-block starts at 'pin', the middle point is 'pmid', and
-        // it ends at 'pout'. Element 'p' is found at middle point
-        rocblas_int tmp = nbx * dm2;
-        rocblas_int pin = ps[tmp];
-        rocblas_int pmid = ps[tmp + dm];
-        tmp += dm2;
-        rocblas_int pout = tmp < blks ? ps[tmp] : n;
-        S p = 2 * E[pmid - 1];
-        rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block            
-        rocblas_int j = jj - pin;
+    // column 'jj' belongs to sub-block 'bx' and thus forms part of 
+    // the new sub-block 'nbx'
+    rocblas_int bx = bp[jj];
+    rocblas_int nbx = bx / dm2;
+    
+    // the new sub-block starts at 'pin', the middle point is 'pmid', and
+    // it ends at 'pout'. Element 'p' is found at middle point
+    rocblas_int tmp = nbx * dm2;
+    rocblas_int pin = ps[tmp];
+    rocblas_int pmid = ps[tmp + dm];
+    tmp += dm2;
+    rocblas_int pout = tmp < blks ? ps[tmp] : n;
+    S p = 2 * E[pmid - 1];
+    rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block            
+    rocblas_int j = jj - pin;
 
-        if(j < nr)
+    if(j < nr)
+    {
+        S* tmpd = temps + pin * n;
+        S* ev = ev2 + pin;
+        S* Z = z1 + pin;
+
+        // if 'p' is negative, the values are copied as negative in reverse order
+        // as required by the secular equation solvers
+        bool pneg = (p < 0);
+        rocblas_int sig = pneg ? -1 : 1;
+        rocblas_int start = pneg ? nr - 1 : 0;
+
+        for(int i = rid; i < nr; i += dimr)
         {
-            S* tmpd = temps + pin * n;
-            S* ev = ev2 + pin;
-            S* Z = z1 + pin;
-
-            // if 'p' is negative, the values are copied as negative in reverse order
-            // as required by the secular equation solvers
-            bool pneg = (p < 0);
-            rocblas_int sig = pneg ? -1 : 1;
-            rocblas_int start = pneg ? nr - 1 : 0;
-
-//            for(int i = rid; i < nr; i += dimr)
-            for(int i = hipThreadIdx_x; i < nr; i += hipBlockDim_x)
-            {
-                int id = start + sig * i;
-                tmpd[i + j * n] = sig * ev[id];
-                if(j == 0)
-                    Z[i] = z2[id + pin];
-            }
+            int id = start + sig * i;
+            tmpd[i + j * n] = sig * ev[id];
+            if(j == 0)
+                Z[i] = z2[id + pin];
         }
-//    }
+    }
 }
 
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEROTATE_KERNEL performs rotation of vectors corresponding to deflations
         - Call this kernel with batch_count groups in y, and n (matrix size) groups in x.
         - Each group will deal with one deflation group, groups that don't correspond to
-          a deflation group will do nothing **/
+          a deflation group will do nothing.
+        - Size of groups is set to STEDC_BDIM **/
 template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     stedc_mergeRotate_kernel(const rocblas_int levs,
@@ -654,9 +644,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         - Call this kernel with batch_count groups in y, and as many groups in x as needed
           to cover the n values of the matrix.
         - Each thread will deal with one value.  
-        - Size of groups is set to STEDC_BDIM.**/
+        - Size of groups is set to STEDC_BDIM_VALUES.**/
 template <typename S>
-ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
+ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM_VALUES)
 stedc_mergeValues_kernel(const rocblas_int levs,
                        const rocblas_int blks,
                        const rocblas_int k,
@@ -691,6 +681,7 @@ stedc_mergeValues_kernel(const rocblas_int levs,
     rocblas_int* ps = workInt + bid * (5 * n + 2 * blks);
     rocblas_int* nrs = ps + blks;
     rocblas_int* idd2 = nrs + blks + n;
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
     S* z1 = workSvec + bid * (std::max(7,n) * n);
     S* ev3 = z1 + 4*n;
     S* temps = workStmp + bid * (n * n);
@@ -704,7 +695,7 @@ stedc_mergeValues_kernel(const rocblas_int levs,
 
         // item 'tx' belongs to sub-block 'bx' and thus participates 
         // in the merge to create the new sub-block 'nbx'
-        rocblas_int bx = bisearch(tx, ps, blks, false, false) - 1;
+        rocblas_int bx = bp[tx];
         rocblas_int nbx = bx / dm2;
 
         // the new sub-block starts at 'pin', the middle point is 'pmid', and
@@ -782,6 +773,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int* nrs = ps + blks;
     rocblas_int* idd1 = nrs + blks;
     rocblas_int* idd2 = idd1 + n;
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
     S* z1 = workSvec + bid * (std::max(7,n) * n);
     S* ev3 = z1 + 4*n;
 
@@ -793,7 +785,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     {
         // item 'j' belongs to sub-block 'bx' and thus form vector of 
         // the new sub-block 'nbx'
-        rocblas_int bx = bisearch(j, ps, blks, false, false) - 1;
+        rocblas_int bx = bp[j];
         rocblas_int nbx = bx / dm2;
         
         // the new sub-block starts at 'pin', the middle point is 'pmid', and
@@ -832,7 +824,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGERESCALE_KERNEL reconstructs perturbed vector Z of the rank-1 system.
-        - Call this kernel with batch_count groups in z, blks groups in y and n groups in x.
+        - Call this kernel with batch_count groups in y, and n groups in x.
         - Each group will deal with one row of Z corresponding to each merge.
         - Size of groups is set to STEDC_BDIM.**/
 template <bool USEGEMM, typename S>
@@ -849,13 +841,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                               rocblas_int* workInt)
 {
     // threads and groups indices
-    // batch instance id
-    rocblas_int bid = hipBlockIdx_z;
-    // row id
-    rocblas_int i = hipBlockIdx_x;
-    // sub-block id
-    rocblas_int nbx = hipBlockIdx_y;
-    // thread id
+    rocblas_int bid = hipBlockIdx_y;
+    rocblas_int ii = hipBlockIdx_x;
     rocblas_int tidb = hipThreadIdx_x;
     rocblas_int dim = hipBlockDim_x;
 
@@ -865,6 +852,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     // temporary arrays in global memory
     rocblas_int* ps = workInt + bid * (5 * n + 2 * blks);
     rocblas_int* nrs = ps + blks;
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
     S* z1 = workSvec + bid * (std::max(7,n) * n);
     S* ev2 = z1 + 3*n;
     S* temps = workStmp + bid * (n * n);
@@ -877,53 +865,57 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int dm = 1 << k;
     rocblas_int dm2 = dm << 1;
 
-    if(nbx < blks / dm2)
+    // 'ii' belongs to sub-block 'bx' and thus form vector of 
+    // the new sub-block 'nbx'
+    rocblas_int bx = bp[ii];
+    rocblas_int nbx = bx / dm2;
+    
+    // the new sub-block starts at 'pin', the middle point is 'pmid', and
+    // it ends at 'pout'. Element 'p' is found at middle point
+    rocblas_int tmp = nbx * dm2;
+    rocblas_int pin = ps[tmp];
+    rocblas_int pmid = ps[tmp + dm];
+    tmp += dm2;
+    rocblas_int pout = tmp < blks ? ps[tmp] : n;
+    S p = 2 * E[pmid - 1];
+    rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block
+
+    S* evd = ev2 + pin;
+    rocblas_int start = (p < 0) ? nr - 1 : 0;
+    rocblas_int inc = (p < 0) ? -1 : 1;
+
+    rocblas_int i = ii - pin;
+
+    // 1. compute re-scaled vector Z of rank-1 perturbed system 
+    // --------------------------------------------------------------------
+    if(i < nr)
     {
-        // the new sub-block starts at 'pin', the middle point is 'pmid', and
-        // it ends at 'pout'. Element 'p' is found at middle point
-        rocblas_int tmp = nbx * dm2;
-        rocblas_int pin = ps[tmp];
-        rocblas_int pmid = ps[tmp + dm];
-        tmp += dm2;
-        rocblas_int pout = tmp < blks ? ps[tmp] : n;
-        S p = 2 * E[pmid - 1];
-        rocblas_int nr = nrs[nbx * dm2];  // number of non-deflated values in sub-block
+        rocblas_int sgnz = (z1[i + pin] < 0) ? -1 : 1;
+        S dd = evd[start + inc * i];
+        S mul = 1;
 
-        S* evd = ev2 + pin;
-        rocblas_int start = (p < 0) ? nr - 1 : 0;
-        rocblas_int inc = (p < 0) ? -1 : 1;
-
-        // 1. compute re-scaled vector Z of rank-1 perturbed system 
-        // --------------------------------------------------------------------
-        if(i < nr)
+        for(int j = tidb; j < nr; j += dim)
         {
-            rocblas_int sgnz = (z1[i + pin] < 0) ? -1 : 1;
-            S dd = evd[start + inc * i];
-            S mul = 1;
-
-            for(int j = tidb; j < nr; j += dim)
-            {
-                S num = std::abs(temps[i + (j + pin) * n]);
-                S den = (j == i) ? 1 : std::abs(dd - evd[start + inc * j]);
-                mul *= num / den;
-            }
-            inrms[tidb] = mul;
-            __syncthreads();
-
-            // reduction (for the norms)
-            for(int r = dim / 2; r > 0; r /= 2)
-            {
-                if(tidb < r)
-                {
-                    mul *= inrms[tidb + r];
-                    inrms[tidb] = mul;
-                }
-                __syncthreads();
-            }
-
-            if(tidb == 0)
-                zf[i + pin] = sgnz * std::sqrt(mul);
+            S num = std::abs(temps[i + (j + pin) * n]);
+            S den = (j == i) ? 1 : std::abs(dd - evd[start + inc * j]);
+            mul *= num / den;
         }
+        inrms[tidb] = mul;
+        __syncthreads();
+
+        // reduction (for the norms)
+        for(int r = dim / 2; r > 0; r /= 2)
+        {
+            if(tidb < r)
+            {
+                mul *= inrms[tidb + r];
+                inrms[tidb] = mul;
+            }
+            __syncthreads();
+        }
+
+        if(tidb == 0)
+            zf[i + pin] = sgnz * std::sqrt(mul);
     }
 }
 
@@ -963,6 +955,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     rocblas_int* ps = workInt + bid * (5 * n + 2 * blks);
     rocblas_int* nrs = ps + blks;
     rocblas_int* idd2 = nrs + blks + n;
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
     S* vecs = workSvec + bid * (std::max(7,n) * n);
     S* temps = workStmp + bid * (n * n);
     S* zf = workSz + bid * n;
@@ -976,7 +969,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
     // column 'j' belongs to sub-block 'bx' and thus form vector of 
     // the new sub-block 'nbx'
-    rocblas_int bx = bisearch(j, ps, blks, false, false) - 1;
+    rocblas_int bx = bp[j];
     rocblas_int nbx = bx / dm2;
         
     // the new sub-block starts at 'pin', the middle point is 'pmid', and
@@ -1627,7 +1620,7 @@ print_device_matrix(std::cout,"temps after values",n,n,workStmp,n);
 HIP_CHECK(hipEventRecord(merge_events[6], stream));
             ROCSOLVER_LAUNCH_KERNEL(
                 (stedc_mergeRescale_kernel<STEDC_EXTERNAL_GEMM, S>),
-                dim3(n, blks, batch_count), dim3(STEDC_BDIM), 0, stream,
+                dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workSz, workInt);        
 
 if(print_debug)
