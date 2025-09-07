@@ -44,7 +44,6 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 #define STEDC_BDIM 512          // Number of threads per thread-block used in main stedc kernels
 #define STEDC_BDIM_VALUES 4     // Number of therads per thread-block used in mergeValues kernel
-#define STEDC_BDIM_SORT 4     // Number of therads per thread-block used in mergeValues kernel
 #define WAVEFRONT 64            // Number of threads in a wavefront
 
 // TODO: using macro STEDC_EXTERNAL_GEMM = true for now. In the future we can pass
@@ -1019,8 +1018,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     {
         // Vectors should be updated at this point when not using external gemm.
         // TODO: the code needs to be revisited and adapted for this new implementation
-        // of stedc. Performance of the internal gemm, and other gemm options (like batched
-        // gemm) needs to be evaluated.
+        // of stedc. Performance of the internal gemm needs to be re-evaluated.
     }*/
 }
 
@@ -1028,8 +1026,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEPREPGEMM1_KERNEL prepares the matrix of vectors of the rank-1 system for 
     the gemm to update eigenvectors (pad with zeros and insert 1 for deflated values).
-        - Call this kernel with batch_count groups in y, and as many groups as needed in 
-          x to cover the n columns 
+        - Call this kernel with batch_count groups in y, and n groups in x. 
         - Groups are size STEDC_BDIM **/
 template <typename S> __launch_bounds__(STEDC_BDIM)
 ROCSOLVER_KERNEL void stedc_mergePrepgemm1_kernel(const rocblas_int levs,
@@ -1040,21 +1037,39 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm1_kernel(const rocblas_int levs,
                                               rocblas_int* workInt)
 {
     // threads and groups indices
-    // batch instance id
     rocblas_int bid = hipBlockIdx_y;
-    rocblas_int dim = hipGridDim_x * hipBlockDim_x;
-    rocblas_int tid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    rocblas_int j = hipBlockIdx_x;
+    rocblas_int dim = hipBlockDim_x;
+    rocblas_int tid = hipThreadIdx_x;
 
     // temporary arrays in global memory
     rocblas_int* ps = workInt + bid * (5 * n + 2 * blks);
     rocblas_int* idd1 = ps + 2 * blks;
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
     S* temps = workStmp + bid * (n * n);
 
-    for(int j = tid; j < n; j += dim)
+    rocblas_int dm = 1 << k;
+    rocblas_int dm2 = dm << 1;
+
+    // column 'j' belongs to sub-block 'bx' and thus form vector of
+    // the new sub-block 'nbx'
+    rocblas_int bx = bp[j];
+    rocblas_int nbx = bx / dm2;
+
+    // the new sub-block starts at 'pin', and
+    // it ends at 'pout'. Its size is 'sz'
+    rocblas_int tmp = nbx * dm2;
+    rocblas_int pin = ps[tmp];
+    tmp += dm2;
+    rocblas_int pout = tmp < blks ? ps[tmp] : n;
+    rocblas_int sz = pout - pin;
+   
+    rocblas_int t = idd1[j]; 
+
+    for(int ii = tid; ii < sz; ii += dim)
     {
-        rocblas_int i = idd1[j];
-        if(i >= 0)
-            temps[i + j * n] = 1;
+        rocblas_int i = ii + pin;
+        temps[i + j * n] = (i == t) ? 1 : 0;
     }
 }
 
@@ -1075,9 +1090,7 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
                                               rocblas_int* workInt)
 {
     // threads and groups indices
-    // batch instance id
     rocblas_int bid = hipBlockIdx_y;
-    // column vector id
     rocblas_int j = hipBlockIdx_x;
     rocblas_int tid = hipThreadIdx_x;
     rocblas_int dim = hipBlockDim_x;
@@ -1090,6 +1103,7 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
     rocblas_int* nrs = ps + blks;
     rocblas_int* idd1 = nrs + blks;
     rocblas_int* idd2 = idd1 + n;
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
     S* vecs = workSvec + bid * (std::max(7,n) * n);
     S* temps = workStmp + bid * (n * n);
 
@@ -1098,7 +1112,7 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
 
     // column 'j' belongs to sub-block 'bx' and thus form vector of
     // the new sub-block 'nbx'
-    rocblas_int bx = bisearch(j, ps, blks, false, false) - 1;
+    rocblas_int bx = bp[j];
     rocblas_int nbx = bx / dm2;
 
     // the new sub-block starts at 'pin', the middle point is 'pmid', and
@@ -1137,35 +1151,55 @@ ROCSOLVER_KERNEL void stedc_mergePrepgemm_kernel(const rocblas_int levs,
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEUPDATE_KERNEL updates vectors after a merge is done. 
     (simply copy results from temporary arrays into V)
-        - Call this kernel with batch_count groups in z, and as many groups as needed in 
-          x and y to cover the n rows and columns **/
-template <typename S>
-ROCSOLVER_KERNEL void 
-    stedc_mergeUpdate_kernel(const rocblas_int n,
+        - Call this kernel with batch_count groups in y, and n groups in x 
+        - Groups are size STEDC_BDIM **/
+template <typename S> 
+ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
+    stedc_mergeUpdate_kernel(const rocblas_int levs,
+                             const rocblas_int blks,
+                             const rocblas_int k,
+                             const rocblas_int n,
                              S* CC,
                              const rocblas_int shiftC,
                              const rocblas_int ldc,
                              const rocblas_stride strideC,
-                             S* workSvec)
+                             S* workSvec,
+                             rocblas_int* workInt)
 {
     // threads and groups indices
-    // batch instance id
-    rocblas_int bid = hipBlockIdx_z;
-    rocblas_int dimr = hipGridDim_x * hipBlockDim_x;
-    rocblas_int dimc = hipGridDim_y * hipBlockDim_y;
-    // row id
-    rocblas_int rid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    // column/vector id
-    rocblas_int cid = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    rocblas_int bid = hipBlockIdx_y;
+    rocblas_int j = hipBlockIdx_x;
+    rocblas_int dim = hipBlockDim_x;
+    rocblas_int tid = hipThreadIdx_x;
 
     // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
     S* W = workSvec + bid * (n * n);
 
-    for(int j = cid; j < n; j += dimc)
+    // temporary arrays in global memory
+    rocblas_int* ps = workInt + bid * (5 * n + 2 * blks);
+    rocblas_int* bp = ps + 2 * blks + 4 * n;
+
+    rocblas_int dm = 1 << k;
+    rocblas_int dm2 = dm << 1;
+
+    // column 'j' belongs to sub-block 'bx' and thus form vector of
+    // the new sub-block 'nbx'
+    rocblas_int bx = bp[j];
+    rocblas_int nbx = bx / dm2;
+
+    // the new sub-block starts at 'pin', and
+    // it ends at 'pout'. Its size is 'sz'
+    rocblas_int tmp = nbx * dm2;
+    rocblas_int pin = ps[tmp];
+    tmp += dm2;
+    rocblas_int pout = tmp < blks ? ps[tmp] : n;
+    rocblas_int sz = pout - pin;
+
+    for(int ii = tid; ii < sz; ii += dim)
     {
-        for(int i = rid; i < n; i += dimr)
-            C[i + j * ldc] = W[i + j * n];
+        rocblas_int i = ii + pin;
+        C[i + j * ldc] = W[i + j * n];
     }
 }
 
@@ -1509,8 +1543,8 @@ print_device_matrix(std::cout,"V at leaves",n,n,V,ldv);
         for(rocblas_int k = 0; k < levs; ++k) 
         {
 
-hipEvent_t merge_events[14];            
-for(int i = 0; i < 14; i++)
+hipEvent_t merge_events[13];            
+for(int i = 0; i < 13; i++)
     HIP_CHECK(hipEventCreate(&merge_events[i]));
 
 
@@ -1564,9 +1598,6 @@ HIP_CHECK(hipEventRecord(merge_events[2], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergePrepare_kernel<S>), dim3(n, batch_count), 
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, E + shiftE, strideE,
                                     workSvecs, workStmp, workInt);
-/*            ROCSOLVER_LAUNCH_KERNEL((stedc_mergePrepare_kernel<S>), dim3(groupsn, groupsn, batch_count), 
-                                    dim3(BS2,BS2), 0, stream, levs, blks, k, n, E + shiftE, strideE,
-                                    workSvecs, workStmp, workInt);*/
 
 if(print_debug)
 {
@@ -1648,11 +1679,8 @@ print_device_matrix(std::cout,"temps after vectors",n,n,workStmp,n);
             if(STEDC_EXTERNAL_GEMM)
             {
 HIP_CHECK(hipEventRecord(merge_events[8], stream));
-                HIP_CHECK(hipMemsetAsync((void*)(workStmp), 0, sizeof(S) * (n * n) * batch_count, stream));
-
-HIP_CHECK(hipEventRecord(merge_events[9], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm1_kernel<S>,
-                dim3(numgrps, batch_count), dim3(STEDC_BDIM), 0, stream,
+                dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, workStmp, workInt);
 
 if(print_debug)
@@ -1660,7 +1688,7 @@ if(print_debug)
 print_device_matrix(std::cout,"temps after prepgem1",n,n,workStmp,n);
 }
 
-HIP_CHECK(hipEventRecord(merge_events[10], stream));
+HIP_CHECK(hipEventRecord(merge_events[9], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm_kernel<S>,
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workInt);
@@ -1671,7 +1699,7 @@ print_device_matrix(std::cout,"V",n,n,V,ldv);
 print_device_matrix(std::cout,"temps after prepgem",n,n,workStmp,n);
 }
 
-HIP_CHECK(hipEventRecord(merge_events[11], stream));
+HIP_CHECK(hipEventRecord(merge_events[10], stream));
                 if(USE_BATCH_GEMM)
                 {
                     HIP_CHECK(hipMemsetAsync((void*)(workSvecs), 0, sizeof(S) * (n * n), stream));
@@ -1744,20 +1772,20 @@ print_device_matrix(std::cout,"new vectors",n,n,V,ldv);
 }
             }
 
-HIP_CHECK(hipEventRecord(merge_events[12], stream));
+HIP_CHECK(hipEventRecord(merge_events[11], stream));
             // d. update level
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<S>),
-                                     dim3(groupsn, groupsn, batch_count), dim3(BS2,BS2), 0, stream, 
-                                     n, V, 0, ldv, strideV, workSvecs);
+                                     dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, 
+                                     levs, blks, k, n, V, 0, ldv, strideV, workSvecs, workInt);
 
-HIP_CHECK(hipEventRecord(merge_events[13], stream));
+HIP_CHECK(hipEventRecord(merge_events[12], stream));
 
             HIP_CHECK(hipStreamSynchronize(stream));
-            float merge_elapsed[13];
+            float merge_elapsed[12];
 
-            for(int i = 0; i < 13; i++)
+            for(int i = 0; i < 12; i++)
                 HIP_CHECK(hipEventElapsedTime(&merge_elapsed[i], merge_events[i], merge_events[i+1]));
-            for(int i = 0; i < 14; i++)
+            for(int i = 0; i < 13; i++)
                 HIP_CHECK(hipEventDestroy(merge_events[i]));
 
 if(print_times)
@@ -1770,14 +1798,13 @@ if(print_times)
                    "\tmergeReinsert      : %f\n"
                    "\tmergeRescale       : %f\n"
                    "\tmergeVectors       : %f\n"
-                   "\tmemset             : %f\n" 
                    "\tmergePrepgemm1     : %f\n"
                    "\tmergePrepgemm      : %f\n" 
                    "\tGEMM               : %f\n"
                    "\tupdate             : %f\n",
                 merge_elapsed[0], merge_elapsed[1], merge_elapsed[2], merge_elapsed[3], merge_elapsed[4], 
                 merge_elapsed[5], merge_elapsed[6], merge_elapsed[7], merge_elapsed[8], merge_elapsed[9],
-                merge_elapsed[10], merge_elapsed[11], merge_elapsed[12]);
+                merge_elapsed[10], merge_elapsed[11]);
             fflush(stdout);
 }
 
