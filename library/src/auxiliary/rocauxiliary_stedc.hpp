@@ -422,17 +422,8 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
         // in each sub-block
         posi[tx] = miposi;
         posf[tx] = miposf;
-
-//printf("========== -1 >>> nbx=%d, tid=%d, tx=%d, bx=%d, posi[%d]=%d, posf[%d]=%d ============\n",nbx,tid,tx,bx,tx,posi[tx],tx,posf[tx]);
     }
     __syncthreads();
-/*if(nbx == whob && tid == 0)
-{
-    printf("====== init =====\n");
-    for(int cc=pin;cc<pout;++cc)
-        printf("%d ",dcount[cc]);
-    printf("\n");
-}*/
 
     // now reduce the results of all the sub-blocks 
     // merging the different sequences when required.
@@ -515,29 +506,9 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
             go = (tmp1 > 0 && tmp2 < 0) || (tmp1 < 0 && tmp2 > 0); 
             posf[bin - sh] = go ? tmp : tmp2;
             posi[bin - sh] = go ? tmp : tmp1;
-
-//printf("========== %d >>> nbx=%d, tid=%d, bin=%d, posf[%d]=%d, posi[%d]=%d ============\n",kk,nbx,tid,bin,bin-sh,posf[bin-sh],bin-sh,posi[bin-sh]);
         }
         __syncthreads();
-/*if(nbx == whob && tid == 0)
-{
-    printf("====== kk = %d =====\n",kk);
-    for(int cc=pin;cc<pout;++cc)
-        printf("%d ",dcount[cc]);
-    printf("\n");
-}*/
     }    
-
-
-
-/*if(nbx == whob && tid == 0)
-{
-    for(int cc=pin;cc<pout;++cc)
-        printf("%d ",dcount[cc]);
-    printf("\n");
-}*/
-
-
 
     // compute final number of non-deflated elementes in each sub-block
     for(auto tx = tid; tx < dm2; tx += dim)
@@ -549,11 +520,6 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
         rocblas_int out = tmp < blks ? ps[tmp] : n;
 
         rocblas_int count = 0;
-/*        for(auto j = in; j < out; ++j)
-        {
-            if(dcount[j] > 0)
-                count++;
-        }*/
         rocblas_int j = in;
         while(j < out)
         {
@@ -577,15 +543,6 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
     }
     __syncthreads();
 
-
-/*if(nbx == whob && tid == 0)
-{
-    for(int cc=0;cc<dm2;++cc)
-        printf("%d ",posf[cc]);
-    printf("\n");
-}*/
-
-
     // reduce the results of all the sub-blocks
     for(auto kk = 0; kk <= k; ++kk)
     {
@@ -598,13 +555,6 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
         }
         __syncthreads();
     }
-
-/*if(nbx == whob && tid == 0)
-{
-    for(int cc=0;cc<dm2;++cc)
-        printf("%d ",posf[cc]);
-    printf("\n");
-}*/
 
     // store final number of non-deflated elements in 'nrs'
     for(auto tx = tid; tx < dm2; tx += dim)
@@ -735,8 +685,6 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
         }
     }
 }
-
-
 
 /*template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
@@ -889,7 +837,6 @@ stedc_mergeDeflate_kernel(const rocblas_int levs,
                             valz = rr;
 
                             // save the rotation encoded for mergeRotate
-//                            count++;
                             rmap[oldi + count] = mapt;
                             c[mapt] = cc;
                             s[mapt] = ss;
@@ -1712,15 +1659,24 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
     // otherwise use divide and conquer algorithm:
     else
     {
-        if(BATCHED && !COMPLEX)
-            *size_workArr = sizeof(S*) * batch_count;
-        else
-            *size_workArr = 0;
-        
         // find number of sub-blocks 
         rocblas_int levs = stedc_num_levels(n);
         rocblas_int blks = 1 << levs;
-
+        
+        // requirements for batched operations
+        *size_workArr = 0;
+        if(batch_count > 1)
+        {    
+            if(BATCHED && !COMPLEX)
+                *size_workArr = sizeof(S*) * batch_count;
+        }
+        else
+        {
+            //if(WITH_GEMM_BATCHED)
+            rocblas_int max_n_merges = 1 << (levs - 1);
+            *size_workArr = sizeof(S*) * max_n_merges * 3;
+        }
+        
         // requirements for solver of small independent blocks
         size_t vec1;
         rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, &vec1);
@@ -1847,22 +1803,6 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
     {
         S* workSvecs = (S*)workSvec;
 
-//int ttt = atoi(getenv("DEBUG"));
-//bool print_debug = (ttt == 1);
-//int ttt2 = atoi(getenv("TIMES"));
-//bool print_times = (ttt2 == 1);
-
-//hipEvent_t setup_events[4];
-//for(auto i = 0; i < 4; i++)
-//    HIP_CHECK(hipEventCreate(&setup_events[i]));
-
-/*if(print_debug)
-{
-printf("\n");
-print_device_matrix(std::cout,"D in",1,n,D,1,n,0);
-print_device_matrix(std::cout,"E in",1,n-1,E,1,n,0);
-}*/
-
         // everything must be executed with scalars on the host
         rocblas_pointer_mode old_mode;
         rocblas_get_pointer_mode(handle, &old_mode);
@@ -1894,52 +1834,23 @@ print_device_matrix(std::cout,"E in",1,n-1,E,1,n,0);
             strideV = (rocblas_int)(sizeof(T) / sizeof(S)) * strideC;
         }
         rocblas_int groupsn = (n - 1) / BS2 + 1;
-//HIP_CHECK(hipEventRecord(setup_events[0], stream));
         ROCSOLVER_LAUNCH_KERNEL(init_ident<S>, dim3(groupsn, groupsn, batch_count), dim3(BS2, BS2),
                                 0, stream, n, n, V, 0, ldv, strideV);
 
         // 1. divide phase
         //-----------------------------
         rocblas_int groups = (batch_count - 1) / STEDC_BDIM + 1;
-//HIP_CHECK(hipEventRecord(setup_events[1], stream));
         ROCSOLVER_LAUNCH_KERNEL((stedc_divide_kernel<S>),
                                 dim3(groups), dim3(STEDC_BDIM), 0, stream, levs, blks, n, D + shiftD,
                                 strideD, E + shiftE, strideE, batch_count, workInt);
 
         // 2. solve phase
         //-----------------------------
-//HIP_CHECK(hipEventRecord(setup_events[2], stream));
         ROCSOLVER_LAUNCH_KERNEL((stedc_solve_kernel<S>),
                                 dim3(blks, batch_count), dim3(WAVEFRONT), 0, stream, levs, blks, 
                                 n, D + shiftD, strideD, E + shiftE, strideE, 
                                 V, 0, ldv, strideV, info, workSvecs, workInt, 
                                 eps, ssfmin, ssfmax);
-
-//HIP_CHECK(hipEventRecord(setup_events[3], stream));
-
-/*        HIP_CHECK(hipStreamSynchronize(stream));
-        float elapsed[3];
-        for(auto i = 0; i < 3; i++)
-            HIP_CHECK(hipEventElapsedTime(&elapsed[i], setup_events[i], setup_events[i+1]));
-        for(auto i = 0; i < 4; i++)
-            HIP_CHECK(hipEventDestroy(setup_events[i]));
-
-if(print_times)
-{
-printf("\tSTEDC_TIMES            \n"
-       "\tinit_ident         : %f\n"
-       "\tstedc_divide_kernel: %f\n"
-       "\tstedc_solve_kernel : %f\n",
-       elapsed[0], elapsed[1], elapsed[2]);
-}*/
-
-/*if(print_debug)
-{
-print_device_matrix(std::cout,"ps",1,blks,workInt,1);
-print_device_matrix(std::cout,"D at leaves",1,n,D,1);
-print_device_matrix(std::cout,"E at leaves",1,n-1,E,1);
-print_device_matrix(std::cout,"V at leaves",n,n,V,ldv);
-}*/
 
         // 3. merge phase
         //----------------
@@ -1975,201 +1886,59 @@ print_device_matrix(std::cout,"V at leaves",n,n,V,ldv);
         // ------------------------------------------------------------------//
         for(auto k = 0; k < levs; ++k) 
         {
-
-//hipEvent_t merge_events[14];            
-//for(auto i = 0; i < 14; i++)
-//    HIP_CHECK(hipEventCreate(&merge_events[i]));
-
-
-            // a. prepare secular equations
-/*if(print_debug)
-{
-printf("------------------------------------------\n");
-printf("     start merge at level k = %d\n",k);
-printf("------------------------------------------\n\n");
-//print_device_matrix(std::cout,"values to be merge-sorted",1,n,D,1,n,0);
-//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
-
-//HIP_CHECK(hipEventRecord(merge_events[0], stream));
+            // a. merge sort and deflation
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeSort_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, D + shiftD, strideD,
                                     V, 0, ldv, strideV, workSvecs, workInt);
 
-/*if(print_debug)
-{
-printf("after mergeSort:\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,"ids of the sort",1,n,workInt+2*blks,1);
-print_device_matrix(std::cout,"z after sort",1,n,workSvecs,1);
-print_device_matrix(std::cout,"values after sort",1,n,workSvecs+2*n,1);
-//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
-
-
             rocblas_int ngps = blks / (1 << (k + 1));
             size_t lmemsize = sizeof(S) * blks + sizeof(rocblas_int) * 2 * (1 << (k + 1));
-//HIP_CHECK(hipEventRecord(merge_events[1], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeSequences_kernel<S>), dim3(ngps, batch_count),
                                     dim3(STEDC_BDIM), lmemsize, stream, levs, blks, k, n, E + shiftE, strideE,
                                     workSvecs, workInt, eps);
 
-
-/*if(print_debug)
-{
-printf("after mergeSequecnes\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,">>>nrs",1,blks,workInt+blks,1);
-print_device_matrix(std::cout,">>>dcounts",1,n,workInt+2*blks+2*n,1);
-}*/
-
-
-//HIP_CHECK(hipEventRecord(merge_events[2], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeDeflate_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, 
                                     workSvecs, workInt, eps);
 
-/*if(print_debug)
-{
-printf("after mergeDeflate1\n");
-printf("---------------------\n");
-//print_device_matrix(std::cout,"size of non-deflated",1,blks,workInt+blks,1);
-print_device_matrix(std::cout,"ids after deflation",1,n,workInt+2*blks+n,1);
-print_device_matrix(std::cout,"non deflated values",1,n,workSvecs+3*n,1);
-print_device_matrix(std::cout,"deflated values",1,n,workSvecs+4*n,1);
-//print_device_matrix(std::cout,"deflated z",1,n,workSvecs+n,1);
-print_device_matrix(std::cout,"dcount of rotations",1,n,workInt+2*blks+2*n,1);
-print_device_matrix(std::cout,"rmap of rotations",1,n,workInt+2*blks+3*n,1);
-print_device_matrix(std::cout,"rotations c",1,n,workSvecs+5*n,1);
-print_device_matrix(std::cout,"rotations s",1,n,workSvecs+6*n,1);
-}*/
-
-/*HIP_CHECK(hipEventRecord(merge_events[2], stream));
-            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeDeflate_kernel<S>), dim3(ngps, batch_count),
-                                    dim3(STEDC_BDIM), lmemsize, stream, levs, blks, k, n, E + shiftE, strideE,
-                                    workSvecs, workInt, eps, whob, whot);*/
-
-/*if(print_debug)
-{
-printf("after mergeDeflate:\n");
-printf("---------------------\n");
-//print_device_matrix(std::cout,"size of non-deflated",1,blks,workInt+blks,1);
-print_device_matrix(std::cout,"ids after deflation",1,n,workInt+2*blks+n,1);
-print_device_matrix(std::cout,"non deflated values",1,n,workSvecs+3*n,1);
-print_device_matrix(std::cout,"deflated values",1,n,workSvecs+4*n,1);
-//print_device_matrix(std::cout,"deflated z",1,n,workSvecs+n,1);
-print_device_matrix(std::cout,"dcount of rotations",1,n,workInt+2*blks+2*n,1);
-print_device_matrix(std::cout,"rmap of rotations",1,n,workInt+2*blks+3*n,1);
-print_device_matrix(std::cout,"rotations c",1,n,workSvecs+5*n,1);
-print_device_matrix(std::cout,"rotations s",1,n,workSvecs+6*n,1);
-//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
-
-//HIP_CHECK(hipEventRecord(merge_events[3], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergePrepare_kernel<S>), dim3(n, batch_count), 
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, E + shiftE, strideE,
                                     workSvecs, workStmp, workInt);
 
-/*if(print_debug)
-{
-printf("after mergePrepare:\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,"temps after prepare",n,n,workStmp,n);
-print_device_matrix(std::cout,"Z for secular eqns",1,n,workSvecs,1);
-print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
-
-
-
-//HIP_CHECK(hipEventRecord(merge_events[4], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeRotate_kernel<S>), dim3(n, batch_count),
                                     dim3(STEDC_BDIM),
                                     0, stream, levs, blks, k, n,
                                     V, 0, ldv, strideV, workSvecs, workInt);
-/*if(print_debug)
-{
-printf("after mergeRotate:\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,"V after rotate",n,n,V,ldv);            
-//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
 
-            // b. solve secular eq to find merged eigenvalues
-//HIP_CHECK(hipEventRecord(merge_events[5], stream));
+            // b. compute new values
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_kernel<S>), dim3(nng, batch_count),
                                     dim3(STEDC_BDIM_VALUES), 0, stream, levs, blks, k, n, E + shiftE, strideE,
                                     workSvecs, workStmp, workInt, eps, ssfmin, ssfmax);
 
-//HIP_CHECK(hipEventRecord(merge_events[6], stream));
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeReinsert_kernel<S>), dim3(numgrps, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, levs, blks, k, n, D + shiftD, strideD, E + shiftE, strideE,
                                     workSvecs, workInt);
 
-/*if(print_debug)
-{
-printf("after mergeValues:\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,"orig values to secular eqns",1,n,workSvecs+3*n,1);
-print_device_matrix(std::cout,"new values from secular eqns",1,n,workSvecs+4*n,1);
-print_device_matrix(std::cout,"values with deflated re-indserted in order",1,n,D,1);
-print_device_matrix(std::cout,"final order",1,n,workInt+2*blks,1);
-print_device_matrix(std::cout,"temps after values",n,n,workStmp,n);
-//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
+            // c. compute new vectors
+            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeRescale_kernel<STEDC_EXTERNAL_GEMM, S>),
+                                    dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
+                                    levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workSz, workInt);        
 
-            // c. find merged eigenvectors
-//HIP_CHECK(hipEventRecord(merge_events[7], stream));
-            ROCSOLVER_LAUNCH_KERNEL(
-                (stedc_mergeRescale_kernel<STEDC_EXTERNAL_GEMM, S>),
-                dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
-                levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workSz, workInt);        
-
-/*if(print_debug)
-{
-printf("after mergeRescale:\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,"Z re-scaled",1,n,workSz,1);
-//print_device_matrix(std::cout,"vecs",n,n,workSvecs,n);
-}*/
-
-//HIP_CHECK(hipEventRecord(merge_events[8], stream));
             ROCSOLVER_LAUNCH_KERNEL(
                 (stedc_mergeVectors_kernel<STEDC_EXTERNAL_GEMM, S>),
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, 
                 levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workSz, workInt);
 
-/*if(print_debug)
-{
-printf("after mergeVectors:\n");
-printf("---------------------\n");
-print_device_matrix(std::cout,"vecs after vectors",n,n,workSvecs,n);
-print_device_matrix(std::cout,"temps after vectors",n,n,workStmp,n);
-}*/
-
             if(STEDC_EXTERNAL_GEMM)
             {
-//HIP_CHECK(hipEventRecord(merge_events[9], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm1_kernel<S>,
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, workStmp, workInt);
 
-/*if(print_debug)
-{
-print_device_matrix(std::cout,"temps after prepgem1",n,n,workStmp,n);
-}*/
-
-//HIP_CHECK(hipEventRecord(merge_events[10], stream));
                 ROCSOLVER_LAUNCH_KERNEL(stedc_mergePrepgemm_kernel<S>,
                 dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream,
                 levs, blks, k, n, E + shiftE, strideE, workSvecs, workStmp, workInt);
 
-/*if(print_debug)
-{
-print_device_matrix(std::cout,"V",n,n,V,ldv);
-print_device_matrix(std::cout,"temps after prepgem",n,n,workStmp,n);
-}*/
-
-//HIP_CHECK(hipEventRecord(merge_events[11], stream));
                 if(USE_BATCH_GEMM)
                 {
                     HIP_CHECK(hipMemsetAsync((void*)(workSvecs), 0, sizeof(S) * (n * n), stream));
@@ -2236,55 +2005,12 @@ print_device_matrix(std::cout,"temps after prepgem",n,n,workStmp,n);
                                    &one, V, 0, ldv, strideV, workStmp, 0, n, n * n, &zero,
                                    workSvecs, 0, n, n * n, batch_count, workArr);
                 }
-/*if(print_debug)
-{
-print_device_matrix(std::cout,"new vectors",n,n,V,ldv);
-}*/
             }
 
-//HIP_CHECK(hipEventRecord(merge_events[12], stream));
-            // d. update level
+            // d. update for next level
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<S>),
                                      dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, 
                                      levs, blks, k, n, V, 0, ldv, strideV, workSvecs, workInt);
-
-//HIP_CHECK(hipEventRecord(merge_events[13], stream));
-
-/*            HIP_CHECK(hipStreamSynchronize(stream));
-            float merge_elapsed[13];
-
-            for(auto i = 0; i < 13; i++)
-                HIP_CHECK(hipEventElapsedTime(&merge_elapsed[i], merge_events[i], merge_events[i+1]));
-            for(auto i = 0; i < 14; i++)
-                HIP_CHECK(hipEventDestroy(merge_events[i]));
-
-if(print_times)
-{
-            printf("\tmergeSort          : %f\n"
-                   "\tmergeSequences     : %f\n"
-                   "\tmergeDeflate       : %f\n"
-                   "\tmergePrepare       : %f\n"
-                   "\tmergeRotate        : %f\n"
-                   "\tmergeValues        : %f\n"
-                   "\tmergeReinsert      : %f\n"
-                   "\tmergeRescale       : %f\n"
-                   "\tmergeVectors       : %f\n"
-                   "\tmergePrepgemm1     : %f\n"
-                   "\tmergePrepgemm      : %f\n" 
-                   "\tGEMM               : %f\n"
-                   "\tupdate             : %f\n",
-                merge_elapsed[0], merge_elapsed[1], merge_elapsed[2], merge_elapsed[3], merge_elapsed[4], 
-                merge_elapsed[5], merge_elapsed[6], merge_elapsed[7], merge_elapsed[8], merge_elapsed[9],
-                merge_elapsed[10], merge_elapsed[11], merge_elapsed[12]);
-            fflush(stdout);
-}*/
-
-/*if(print_debug)
-{
-print_device_matrix(std::cout,"new D",1,n,D,1);
-print_device_matrix(std::cout,"new V",n,n,V,ldv);
-}*/
-
         }
 
         // 4. Final update 
