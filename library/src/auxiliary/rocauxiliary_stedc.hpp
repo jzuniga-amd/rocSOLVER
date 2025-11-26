@@ -279,7 +279,7 @@ stedc_mergeSort_kernel(const rocblas_int levs,
 
 
 //--------------------------------------------------------------------------------------//
-/** STEDC_MERGESEQUENCES_KERNEL forms the sequences of repeated eigenvalues for the 
+/** STEDC_MERGESEQUENCES_KERNEL finds the sequences of repeated eigenvalues for the 
     relative tolerance on every pair of sub-blocks that need to be merged.
         - Call this kernel with batch_count groups in y, and as many groups as pairs of
           sub-blocks to be merged in x. Each group will deal with one merge. 
@@ -379,10 +379,11 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
     S tol = 8 * eps * maxd;
 
     // Mark deflated values in each sub-block
-    rocblas_int miposi = -1;
-    rocblas_int miposf = -1;
     for(auto tx = tid; tx < dm2; tx += dim)
     {
+        rocblas_int miposi = -1;
+        rocblas_int miposf = -1;
+    
         // each sub-block 'bx' starts and ends at 'in' and 'out', respectively
         rocblas_int bx = nbx * dm2 + tx;    
         rocblas_int in = ps[bx];
@@ -452,6 +453,7 @@ stedc_mergeSequences_kernel(const rocblas_int levs,
             rocblas_int bout = bin + dm;
             rocblas_int out = bout < blks ? ps[bout] : n;
             bool go = (j >= 0 && in >= 0);
+
 
             // find sequences to merge
             while(go && j < out)
@@ -1717,7 +1719,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                     ns[i] = i < res ? sz + 1: sz;
             }
         }
-        
+
         // ****************** launch merge for level k **********************//
         // ------------------------------------------------------------------//
         for(auto k = 0; k < levs; ++k) 
